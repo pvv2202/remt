@@ -11,10 +11,8 @@ parser = argparse.ArgumentParser(description='Generate HTML table from JSON or T
 parser.add_argument('-i', type=str, default=None, required=True, help='File input (JSON or TSV)')
 parser.add_argument('-o', type=str, default="def", required=False, help='File output name (JSON and HTML)')
 parser.add_argument('--coords', default=None, required=False, action='store_true', help='Include coords')
-parser.add_argument('--loci', default=None, required=False, action='store_true', help='Include loci')
 parser.add_argument('--stats', default=None, required=False, action='store_true', help='Print stats to terminal')
 parser.add_argument('--filter_n', default=None, required=False, action='store_true', help='Remove hits with a lot of Ns')
-parser.add_argument('--nearest', default=None, required=False, action='store_true', help='Dont check for sequence matches. Only give the nearest MT/RE pair. This ignores some of the other filters')
 parser.add_argument('--ignore_nonspec', default=None, required=False, action='store_true', help='Filter to ignore MTs with rec seq < 3 bp (nonspecific)')
 parser.add_argument('--min_distance', default=None, required=False, type=int, help='Filter by distance')
 parser.add_argument('--min_score', default=None, required=False, type=int, help='Filter by score (for enzymes, not for final weighted score)')
@@ -183,125 +181,102 @@ for index, item in data.iterrows():
             i = desc.find("RecSeq:")
             recseq_start = i + len("RecSeq:")
             recseq_end = desc.find(";", recseq_start)
-            seq = desc[recseq_start:recseq_end]
+            long = desc[recseq_start:recseq_end]
+            if ", " in long:
+                seq = long.split(", ")
+            else:
+                seq = [long]
+            
+            if args.filter_n:
+                for s in seq:
+                    if "NNN" in s or not args.ignore_nonspec or len(s) < 3:
+                        seq.remove(s)
 
-            if args.filter_n is None or "NNN" not in seq:
-                if "," not in seq:
-                    if not args.ignore_nonspec or len(seq) > 2:
-                        if "EnzType:" in desc:
-                            j = desc.find("EnzType:")
-                            et_start = j + len("EnzType:")
-                            et_end = desc.find(";", et_start)
-                            et = desc[et_start:et_end]
-                            #If MT/RE, respond accordingly - count is used as the reference number
-                            if any(item.get("domain").startswith(prefix) for prefix in prefixes):
-                                contigs[ref].mts[count] = Methyl(seq, item.get("start"), item.get("end"), item.get("score"), item.get("domain"), et, count, item.get("cds"))
-                            else:
-                                contigs[ref].res[count] = RE(seq, item.get("start"), item.get("end"), item.get("score"), item.get("domain"), et, count, item.get("cds"))
-                            count += 1
+            if "EnzType:" in desc and len(seq) > 0:
+                j = desc.find("EnzType:")
+                et_start = j + len("EnzType:")
+                et_end = desc.find(";", et_start)
+                et = desc[et_start:et_end]
+                #If MT/RE, respond accordingly - count is used as the reference number
+                if any(item.get("domain").startswith(prefix) for prefix in prefixes):
+                    contigs[ref].mts[count] = Methyl(seq, item.get("start"), item.get("end"), item.get("score"), item.get("domain"), et, count, item.get("cds"))
+                else:
+                    contigs[ref].res[count] = RE(seq, item.get("start"), item.get("end"), item.get("score"), item.get("domain"), et, count, item.get("cds"))
+                count += 1
 
 hits = {}
 
-#Matching
-if args.nearest:
-    for c in contigs:
-        methyls = contigs[c].mts
-        r_enzs = contigs[c].res
-        for res in r_enzs:
-            r = r_enzs[res]
-            rseq = r.seq
+for c in contigs:
+    methyls = contigs[c].mts
+    r_enzs = contigs[c].res
+    #For each restriction enzyme and methyltransferase
+    for res in r_enzs:
+        r = r_enzs[res]
+        best = [r.seq, None, -30]
+        best_match = [None, 0, None]
+        for rseq in r.seq:
             for mts in methyls:
                 m = methyls[mts]
-                mseq = m.seq
-                dist = distance(min(r.start, r.end), max(r.start, r.end), min(m.start, m.end), max(m.start, m.end))
-                if r.ref not in hits or dist < hits[r.ref]["Distance"]:
-                    #Count range only if it hasn't been calculated yet and if in_range is an argument
+                for mseq in m.seq:
+                    #If args in range is not none, check if the MT is in range. If it is, 
                     if args.in_range is not None:
-                        if r.range is None:
-                            r.range = sum(1 for mt_in_range in methyls if distance(min(r.start, r.end), max(r.start, r.end), min(methyls[mt_in_range].start,methyls[mt_in_range].end), max(methyls[mt_in_range].start, methyls[mt_in_range].end)) < args.in_range)
-                        if m.range is None:
-                            m.range = sum(1 for re_in_range in r_enzs if distance(min(m.start, m.end), max(m.start, m.end), min(r_enzs[re_in_range].start, r_enzs[re_in_range].end), max(r_enzs[re_in_range].start, r_enzs[re_in_range].end)) < args.in_range)
-                    weighted_score = round(calculate_weighted_average([m.score, r.score]) * calculate_similarity(m.seq, r.seq))
-                    temp = {
-                        "Contig": c,
-                        "Types": [m.enzyme, r.enzyme],
-                        "Domains": [m.domain, r.domain],
-                        "Sequences": [mseq, rseq],
-                        "Score": weighted_score,
-                        "Scores": [m.score, r.score],
-                        "Distance": dist
-                    }
-                    if args.in_range is not None:
-                        temp["MT within " + str(args.in_range) + " bp"] = m.range
-                        temp["RE within " + str(args.in_range) + " bp"] = r.range
+                        if distance(min(r.start,r.end), max(r.start,r.end), min(m.start,m.end), max(m.start,m.end)) < args.in_range: 
+                            sim = calculate_similarity(rseq, mseq)
+                            if best_match[0] is None:
+                                best_match = [rseq, mseq, sim]
+                            elif sim > best_match[2]:
+                                best_match = [rseq, mseq, sim]
+                    #If mseq <= rseq (if greater cannot block every site), run smith-waterman
+                    if len(mseq) <= len(rseq):
+                        aligned_mseq, aligned_rseq, score = smith_waterman(mseq, rseq)
+                        #Filtering by score, length of rseq, absoltue value of mseq
+                        if score > 2 and len(aligned_rseq) > 3 and (len(aligned_mseq) == len(mseq)):
+                            dist = distance(min(r.start, r.end), max(r.start, r.end), min(m.start, m.end), max(m.start, m.end))
+                            sim = calculate_similarity(m.seq, r.seq)
+                            asim = calculate_similarity(aligned_mseq, aligned_rseq)
+                            if r.ref in hits:
+                                csim = calculate_similarity(hits[r.ref]["Alignment"][0], hits[r.ref]["Alignment"][1])
+                            #More filters
+                            if r.ref not in hits or (asim > csim - 0.2 and dist < hits[r.ref]["Distance"]):
+                                if (mseq != rseq and "NNN" not in mseq and "NNN" not in rseq) or mseq == rseq:
+                                    #Doing a better job getting the score
+                                    weighted_score = round(calculate_weighted_average([m.score, r.score]) * sim)
+                                    if (weighted_score <= 20 and mseq == rseq) or (weighted_score >= 20 and weighted_score <= 40 and sim > 0.9) or weighted_score > 40:
+                                        if weighted_score > best[2]:
+                                            best = [r, m, weighted_score, rseq, mseq, aligned_rseq, aligned_mseq]
+                if best_match[0] is not None:
+                    m.range.append(best_match[0])
+        if best_match[0] is not None:
+            r.range.append(best_match[1])
+        if best[1] is not None:
+            r = best[0]
+            m = best[1]
+            temp = {
+                "Contig": c,
+                "Types": [m.enzyme, r.enzyme],
+                "Domains": [m.domain, r.domain],
+                "Sequences": [best[4], best[3]],
+                "Alignment": [best[6], best[5]],
+                "Loci": [m.locus, r.locus],
+                "Score": best[2],
+                "Scores": [m.score, r.score],
+                "Distance": distance(min(r.start, r.end), max(r.start, r.end), min(m.start, m.end), max(m.start, m.end))
+            }
+            if args.in_range is not None:
+                for mt_in_range in r.range:
+                    temp["MT within " + str(args.in_range) + " bp"] = mt_in_range
+                for rt_in_range in m.range:
+                    temp["RE within " + str(args.in_range) + " bp"] = rt_in_range
 
-                    if args.coords:
-                        temp["Coords"] = [str(m.start) + ", " + str(m.end), str(r.start) + ", " + str(r.end)]
+            if args.coords:
+                temp["Coords"] = [str(m.start) + ", " + str(m.end), str(r.start) + ", " + str(r.end)]
 
-                    hits[r.ref] = temp    
-else:
-    for c in contigs:
-        methyls = contigs[c].mts
-        r_enzs = contigs[c].res
-        #For each restriction enzyme and methyltransferase
-        for res in r_enzs:
-            r = r_enzs[res]
-            rseq = r.seq
-            for mts in methyls:
-                m = methyls[mts]
-                mseq = m.seq
-                if args.in_range is not None:
-                    if distance(min(r.start, r.end), max(r.start, r.end), min(m.start,m.end), max(m.start, m.end)) < args.in_range: 
-                        r.range.append(m.seq)
-                    if len(r.range) == 0:
-                        r.range.append("None")
-                #If mseq <= rseq (if greater cannot block every site), run smith-waterman
-                if len(mseq) <= len(rseq):
-                    aligned_mseq, aligned_rseq, score = smith_waterman(mseq, rseq)
-                    #Filtering by score, length of rseq, absoltue value of mseq
-                    if score > 2 and len(aligned_rseq) > 3 and (len(aligned_mseq) == len(mseq)):
-                        dist = distance(min(r.start, r.end), max(r.start, r.end), min(m.start, m.end), max(m.start, m.end))
-                        sim = calculate_similarity(m.seq, r.seq)
-                        asim = calculate_similarity(aligned_mseq, aligned_rseq)
-                        if r.ref in hits:
-                            csim = calculate_similarity(hits[r.ref]["Alignment"][0], hits[r.ref]["Alignment"][1])
-                        #More filters
-                        if r.ref not in hits or (asim > csim - 0.2 and dist < hits[r.ref]["Distance"]):
-                            #Count range only if it hasn't been calculated yet and if in_range is an argument
-                            if args.in_range is not None and len(m.range) == 0:
-                                for rt_in_range in r_enzs:
-                                    if distance(min(m.start, m.end), max(m.start, m.end), min(r_enzs[rt_in_range].start,r_enzs[rt_in_range].end), max(r_enzs[rt_in_range].start, r_enzs[rt_in_range].end)) < args.in_range: 
-                                        m.range.append(r_enzs[rt_in_range].seq)
-                                if len(m.range) == 0:
-                                    m.range.append("None")
-                            if (mseq != rseq and "NNN" not in mseq and "NNN" not in rseq) or mseq == rseq:
-                                #Doing a better job getting the score
-                                weighted_score = round(calculate_weighted_average([m.score, r.score]) * sim)
-                                if (weighted_score <= 20 and mseq == rseq) or (weighted_score >= 20 and weighted_score <= 40 and sim > 0.9) or weighted_score > 40:
-                                    temp = {
-                                        "Contig": c,
-                                        "Types": [m.enzyme, r.enzyme],
-                                        "Domains": [m.domain, r.domain],
-                                        "Sequences": [mseq, rseq],
-                                        "Alignment": [aligned_mseq, aligned_rseq],
-                                        "Loci": [m.locus, r.locus],
-                                        "Score": weighted_score,
-                                        "Scores": [m.score, r.score],
-                                        "Distance": dist
-                                    }
-                                    if args.in_range is not None:
-                                        for mt_in_range in r.range:
-                                            temp["MT within " + str(args.in_range) + " bp"] = mt_in_range
-                                        for rt_in_range in m.range:
-                                            temp["RE within " + str(args.in_range) + " bp"] = rt_in_range
+            hits[r.ref] = temp
 
-                                    if args.coords:
-                                        temp["Coords"] = [str(m.start) + ", " + str(m.end), str(r.start) + ", " + str(r.end)]
-
-                                    hits[r.ref] = temp
+        
 #Filtering hits for distance
 if args.min_distance is not None:
-    hits = {h: v for h, v in hits.items() if v["Distance"] >= args.min_distance and v["Domains"][0] != "M.HgiDII"}
+    hits = {h: v for h, v in hits.items() if v["Distance"] >= args.min_distance}
 
 #Printing necessary data for stats
 if args.stats:
