@@ -2,16 +2,16 @@ import json
 import argparse
 import pandas as pd
 import numpy as np
-from numba import jit
 from itertools import product
 import re
 import os
 
 parser = argparse.ArgumentParser(description='Generate HTML table from JSON or TSV data.')
-parser.add_argument('-i', type=str, default=None, required=True, help='File input (JSON or TSV)')
-parser.add_argument('-o', type=str, default="def", required=False, help='File output name (JSON and HTML)')
+parser.add_argument('-i', type=str, nargs='+', default=None, required=True, help='File inputs (JSON or TSV), by domain first')
+parser.add_argument('-o', type=str, default="def", required=False, help='File output name (HTML)')
 parser.add_argument('--coords', default=None, required=False, action='store_true', help='Include coords')
 parser.add_argument('--stats', default=None, required=False, action='store_true', help='Print stats to terminal')
+parser.add_argument('--excel', default=None, required=False, action='store_true', help='Make results excel friendly (default is HTML friendly)')
 parser.add_argument('--filter_n', default=None, required=False, action='store_true', help='Remove hits with a lot of Ns')
 parser.add_argument('--ignore_nonspec', default=None, required=False, action='store_true', help='Filter to ignore MTs with rec seq < 3 bp (nonspecific)')
 parser.add_argument('--min_distance', default=None, required=False, type=int, help='Filter by distance')
@@ -19,9 +19,54 @@ parser.add_argument('--min_score', default=None, required=False, type=int, help=
 parser.add_argument('--in_range', default=None, required=False, type=int, help='Include a metric of how many mts/res are in range of each hit')
 args = parser.parse_args()
 
+class Contig:
+    def __init__(self, ref, length, circular):
+        self.ref = ref
+        self.length = length
+        self.circular = circular
+        self.fusions = 0
+        self.mts = {}
+        self.res = {}
+        self.hits = {}
+
+class Enzyme:
+    def __init__(self, seq, start, end, score, domain, enzyme, ref, locus):
+        # Reference number for faster lookup
+        self.seq = seq
+        self.start = int(start)
+        self.end = int(end)
+        self.score = float(score)
+        self.domain = domain
+        self.enzyme = enzyme
+        self.ref = ref
+        self.locus = locus
+        self.range = set()
+        self.matches = set()
+
+class Methyl(Enzyme):
+    pass
+
+class RE(Enzyme):
+    pass
+
+contigs = {}
+
 # Handling input file
 if args.i is not None:
-    in_file = args.i
+    contig_file = args.i[1]
+    if contig_file.endswith('.json'):
+        with open(contig_file, 'r') as file:
+            cf = json.load(file)
+    elif contig_file.endswith('.tsv'):
+        cf = pd.read_csv(contig_file, sep='\t')
+    else:
+        print('Error: Unsupported file format. Please provide a JSON or TSV file.')
+        exit(1)
+    for index, item in cf.iterrows():
+        ref = item.get("contig")
+        contigs[ref] = Contig(ref, item.get("length"), True if item.get("topology") == "circular" else False)
+
+    in_file = args.i[0]
     if in_file.endswith('.json'):
         with open(in_file, 'r') as file:
             data = json.load(file)
@@ -55,33 +100,6 @@ iupac = {
     'N': '[ACGTVHDBMKWSR]'
 }
 
-class Contig:
-    def __init__(self, ref):
-        self.ref = ref
-        self.hits = 0
-        self.fusions = 0
-        self.mts = {}
-        self.res = {}
-
-class Enzyme:
-    def __init__(self, seq, start, end, score, domain, enzyme, ref, locus):
-        # Reference number for faster lookup
-        self.seq = seq
-        self.start = int(start)
-        self.end = int(end)
-        self.score = float(score)
-        self.domain = domain
-        self.enzyme = enzyme
-        self.ref = ref
-        self.locus = locus
-        self.range = list()
-
-class Methyl(Enzyme):
-    pass
-
-class RE(Enzyme):
-    pass
-
 def calculate_similarity(string1, string2):
     set1 = set(string1)
     set2 = set(string2)
@@ -91,16 +109,17 @@ def calculate_similarity(string1, string2):
 
     return len(intersection) / len(union)
 
-def calculate_weighted_average(scores):
-    weights = [(1 / (score - min(scores) + 1)) for score in scores]
-    weighted_sum = sum(score * weight for score, weight in zip(scores, weights))
-    total_weight = sum(weights)
+def distance(A_start, A_end, B_start, B_end, circ, contig_length):
+    circularity = 0
+    
+    if circ:
+        circularity = min(A_start, B_start) + contig_length - max(A_end, B_end)
 
-    return weighted_sum / total_weight
-
-def distance(A_start, A_end, B_start, B_end):
-    #Circularity = min(A_start, B_start) + contig_length - max(A_end, B_end)
-    return max(0, B_start - A_end, A_start - B_end)
+    toReturn = max(0, B_start - A_end, A_start - B_end)
+    if circ and circularity < toReturn:
+        toReturn = circularity
+    
+    return toReturn
 
 def iupac_match(char1, char2):
     if re.search(iupac[char1], char2):
@@ -108,13 +127,13 @@ def iupac_match(char1, char2):
     return False
 
 def smith_waterman(sequence1, sequence2, exact_match_score = 3, match_score = 1, mismatch_score = -1, gap_penalty = -2):
-    # Initialize the score matrix and traceback matrix
+    #Initialize the score matrix and traceback matrix
     rows = len(sequence1) + 1
     cols = len(sequence2) + 1
     score_matrix = np.zeros((rows, cols))
     traceback_matrix = np.zeros((rows, cols), dtype=int)
 
-    # Fill the score and traceback matrices
+    #Fill the score and traceback matrices
     for i, j in product(range(1, rows), range(1, cols)):
         if sequence1[i - 1] == sequence2[j - 1]:
             to_add = exact_match_score
@@ -134,33 +153,31 @@ def smith_waterman(sequence1, sequence2, exact_match_score = 3, match_score = 1,
         elif score_matrix[i, j] == insert:
             traceback_matrix[i, j] = 3  # Left
 
-    # Find the cell with the maximum score in the score matrix
+    #Find the cell with the maximum score in the score matrix
     max_score = np.max(score_matrix)
     max_i, max_j = np.unravel_index(np.argmax(score_matrix), score_matrix.shape)
 
-    # Traceback to find the alignment
+    #Traceback to find the alignment
     aligned_seq1 = ""
     aligned_seq2 = ""
     i, j = max_i, max_j
 
     while i > 0 and j > 0 and score_matrix[i, j] > 0:
-        if traceback_matrix[i, j] == 1:  # Diagonal
+        if traceback_matrix[i, j] == 1:  #Diagonal
             aligned_seq1 = sequence1[i - 1] + aligned_seq1
             aligned_seq2 = sequence2[j - 1] + aligned_seq2
             i -= 1
             j -= 1
-        elif traceback_matrix[i, j] == 2:  # Up, gap in sequence 2
+        elif traceback_matrix[i, j] == 2:  #Up, gap in sequence 2
             aligned_seq1 = sequence1[i - 1] + aligned_seq1
             aligned_seq2 = "-" + aligned_seq2
             i -= 1
-        elif traceback_matrix[i, j] == 3:  # Left, gap in sequence 1
+        elif traceback_matrix[i, j] == 3:  #Left, gap in sequence 1
             aligned_seq1 = "-" + aligned_seq1
             aligned_seq2 = sequence2[j - 1] + aligned_seq2
             j -= 1
 
     return aligned_seq1, aligned_seq2, max_score
-
-contigs = {}
 
 count = 0
 #Populate contigs by iterating over data. Now using iterrows() to speed up (count is the reference used in dictionary)
@@ -170,14 +187,9 @@ for index, item in data.iterrows():
     if args.min_score is None or item.get("score") >= args.min_score:
         #Factoring enzyme/methyltransferase for the stats
         if args.stats and "enzyme/methyltransferase" in desc:
-            if ref not in contigs:
-                contigs[ref] = Contig(ref)
             contigs[ref].fusions += 1
-            contigs[ref].hits += 1
         #Filtering enzymes I don't want
         elif all(keyword not in desc for keyword in ["control protein", "homing endonuclease", "subunit", "helicase", "nicking endonuclease", "orphan", "methyl-directed", "enzyme/methyltransferase"]) and "RecSeq:" in desc:
-            if ref not in contigs:
-                contigs[ref] = Contig(ref)
             i = desc.find("RecSeq:")
             recseq_start = i + len("RecSeq:")
             recseq_end = desc.find(";", recseq_start)
@@ -186,6 +198,10 @@ for index, item in data.iterrows():
                 seq = long.split(", ")
             else:
                 seq = [long]
+
+            for s in seq:
+                if "-" in s:
+                    seq.remove(s)
             
             if args.filter_n:
                 for s in seq:
@@ -204,76 +220,116 @@ for index, item in data.iterrows():
                     contigs[ref].res[count] = RE(seq, item.get("start"), item.get("end"), item.get("score"), item.get("domain"), et, count, item.get("cds"))
                 count += 1
 
-hits = {}
+#Find best sequence in range and add for all (if within distance)
+if args.in_range is not None:
+    for c in contigs:
+        methyls = contigs[c].mts
+        r_enzs = contigs[c].res
+        for res in r_enzs:
+            r = r_enzs[res]
+            for rseq in r.seq:
+                for mts in methyls:
+                    best_match = []
+                    m = methyls[mts]
+                    for mseq in m.seq:
+                        if distance(min(r.start,r.end), max(r.start,r.end), min(m.start,m.end), max(m.start,m.end), contigs[c].circular, contigs[c].length) < args.in_range: 
+                            sim = calculate_similarity(rseq, mseq)
+                            if len(best_match) == 0:
+                                best_match = [rseq, mseq, sim]
+                            elif sim > best_match[2]:
+                                best_match = [rseq, mseq, sim]
+                    if best_match:
+                        m.range.append(best_match[0])
+                        r.range.append(best_match[1])
 
-for c in contigs:
-    methyls = contigs[c].mts
-    r_enzs = contigs[c].res
+for contig in contigs:
+    c = contigs[contig]
+    methyls = c.mts
+    r_enzs = c.res
     #For each restriction enzyme and methyltransferase
     for res in r_enzs:
         r = r_enzs[res]
-        best = [r.seq, None, -30]
-        best_match = [None, 0, None]
         for rseq in r.seq:
             for mts in methyls:
                 m = methyls[mts]
                 for mseq in m.seq:
-                    #If args in range is not none, check if the MT is in range. If it is, 
-                    if args.in_range is not None:
-                        if distance(min(r.start,r.end), max(r.start,r.end), min(m.start,m.end), max(m.start,m.end)) < args.in_range: 
-                            sim = calculate_similarity(rseq, mseq)
-                            if best_match[0] is None:
-                                best_match = [rseq, mseq, sim]
-                            elif sim > best_match[2]:
-                                best_match = [rseq, mseq, sim]
                     #If mseq <= rseq (if greater cannot block every site), run smith-waterman
                     if len(mseq) <= len(rseq):
                         aligned_mseq, aligned_rseq, score = smith_waterman(mseq, rseq)
-                        #Filtering by score, length of rseq, absoltue value of mseq
+                        #Filtering by score, length of rseq, absolute value of mseq
                         if score > 2 and len(aligned_rseq) > 3 and (len(aligned_mseq) == len(mseq)):
-                            dist = distance(min(r.start, r.end), max(r.start, r.end), min(m.start, m.end), max(m.start, m.end))
-                            sim = calculate_similarity(m.seq, r.seq)
+                            dist = distance(min(r.start, r.end), max(r.start, r.end), min(m.start, m.end), max(m.start, m.end), c.circular, c.length)
+                            sim = calculate_similarity(mseq, rseq)
                             asim = calculate_similarity(aligned_mseq, aligned_rseq)
-                            if r.ref in hits:
-                                csim = calculate_similarity(hits[r.ref]["Alignment"][0], hits[r.ref]["Alignment"][1])
-                            #More filters
-                            if r.ref not in hits or (asim > csim - 0.2 and dist < hits[r.ref]["Distance"]):
-                                if (mseq != rseq and "NNN" not in mseq and "NNN" not in rseq) or mseq == rseq:
-                                    #Doing a better job getting the score
-                                    weighted_score = round(calculate_weighted_average([m.score, r.score]) * sim)
-                                    if (weighted_score <= 20 and mseq == rseq) or (weighted_score >= 20 and weighted_score <= 40 and sim > 0.9) or weighted_score > 40:
-                                        if weighted_score > best[2]:
-                                            best = [r, m, weighted_score, rseq, mseq, aligned_rseq, aligned_mseq]
-                if best_match[0] is not None:
-                    m.range.append(best_match[0])
-        if best_match[0] is not None:
-            r.range.append(best_match[1])
-        if best[1] is not None:
-            r = best[0]
-            m = best[1]
-            temp = {
-                "Contig": c,
-                "Types": [m.enzyme, r.enzyme],
-                "Domains": [m.domain, r.domain],
-                "Sequences": [best[4], best[3]],
-                "Alignment": [best[6], best[5]],
-                "Loci": [m.locus, r.locus],
-                "Score": best[2],
-                "Scores": [m.score, r.score],
-                "Distance": distance(min(r.start, r.end), max(r.start, r.end), min(m.start, m.end), max(m.start, m.end))
-            }
-            if args.in_range is not None:
-                for mt_in_range in r.range:
-                    temp["MT within " + str(args.in_range) + " bp"] = mt_in_range
-                for rt_in_range in m.range:
-                    temp["RE within " + str(args.in_range) + " bp"] = rt_in_range
+                            if (mseq != rseq and "NNN" not in mseq and "NNN" not in rseq) or mseq == rseq:
+                                #Doing a better job getting the score
+                                weighted_score =  round((asim + sim) * score) + round(1000/dist) if dist > 0 else 1000
+                                
+                                if dist < 10000 or (asim == 1 and r.score > 80 and m.score > 80):
+                                    if r.ref not in c.hits or weighted_score > c.hits[r.ref]["Score"]:
+                                        temp = {
+                                            "Contig": contig,
+                                            "Types": [m.enzyme, r.enzyme],
+                                            "Domains": [m.domain, r.domain],
+                                            "Sequences": [mseq, rseq],
+                                            "Alignment": [aligned_mseq, aligned_rseq],
+                                            "Loci": [m.locus, r.locus],
+                                            "Score": weighted_score,
+                                            "Scores": [m.score, r.score],
+                                            "Distance": dist
+                                        }
 
-            if args.coords:
-                temp["Coords"] = [str(m.start) + ", " + str(m.end), str(r.start) + ", " + str(r.end)]
+                                        if args.in_range is not None:
+                                            if len(r.range) == 0:
+                                                r.range.append("None")
+                                            if len(m.range) == 0:
+                                                m.range.append("None")
+                                            for mt_in_range in r.range:
+                                                temp["MT within " + str(args.in_range) + " bp"] = mt_in_range
+                                            for rt_in_range in m.range:
+                                                temp["RE within " + str(args.in_range) + " bp"] = rt_in_range
 
-            hits[r.ref] = temp
+                                        if args.coords:
+                                            temp["Coords"] = [str(m.start) + ", " + str(m.end), str(r.start) + ", " + str(r.end)]
 
-        
+                                        r.matches.append([m.ref, weighted_score, temp, r.ref])
+                                        r.matches.sort(key = lambda x: x[1], reverse = True)
+
+    auction = {}
+    while True:
+        changes = 0
+        for res in r_enzs:
+            r = r_enzs[res]
+            #If the re has a match remaining
+            if len(r.matches) > 0:
+                mref = r.matches[0][0]
+                #Add match to auction
+                if mref not in auction:
+                    auction[mref] = [r.matches[0]]
+                else:
+                    auction[mref].append(r.matches[0])
+                    #Sort so highest value first, descending. Using a queue
+                    auction[mref].sort(key = lambda x: x[1], reverse = True)
+        #Iterate over auction
+        for key in auction:
+            if len(auction[key]) > 1:
+                changes += 1
+                for i in range(len(auction[key]) - 1, 0, -1):
+                    temp = auction[key].pop(i)
+                    if r_enzs[temp[3]].matches:
+                        r_enzs[temp[3]].matches.pop(0)
+        if changes == 0:
+            break
+    
+    #Populate c.hits
+    for key in auction:
+        m = auction[key][0]
+        c.hits[m[3]] = m[2]
+
+hits = {}
+for c in contigs:
+    hits.update(contigs[c].hits)
+
 #Filtering hits for distance
 if args.min_distance is not None:
     hits = {h: v for h, v in hits.items() if v["Distance"] >= args.min_distance}
@@ -289,16 +345,15 @@ if args.stats:
 
     for contig in contigs:
         c = contigs[contig]
-        for h in hits:
-            if c.ref == hits[h]["Contig"]:
-                c.hits += 1
-
-        if len(hit_stats) < c.hits + 1:
-            hit_stats.extend([0] * (c.hits - len(hit_stats) + 1))
-        hit_stats[c.hits] += 1
 
         if (len(c.res) > 0 and len(c.mts) > 0) or c.fusions > 0:
             num_both += 1
+            curr = c.fusions + len(c.hits)
+            #if curr == 0 and contig.startswith("C"):
+               #print(contig)
+            if len(hit_stats) < curr + 1:
+                hit_stats.extend([0] * (curr - len(hit_stats) + 1))
+            hit_stats[curr] += 1
         elif len(c.res) == 0 and len(c.mts) == 0:
             num_none += 1
         elif len(c.res) > 0 and len(c.mts) == 0:
@@ -307,7 +362,6 @@ if args.stats:
                 re_only.append(c)
         elif len(c.res) == 0 and len(c.mts) > 0:
             num_only_mt += 1
-        #Add re/mt fusion data
 
     for i, h in enumerate(hit_stats):
         print(str(i) + ": " + str(h))
@@ -342,7 +396,10 @@ if hits:
             html_table += "<tr>"
             for key, value in item.items():
                 if key == "Alignment" or key == "Sequences" or key == "Coords" or key == "Scores" or key == "Types" or key == "Domains" or key == "Loci":
-                    html_table += "<td style='border: 1px solid black; padding: 8px; text-align: left;'>" + "R: " + str(value[1]) + "<br>" + "M: " + str(value[0]) + "</td>"
+                    if args.excel:
+                        html_table += "<td style='border: 1px solid black; padding: 8px; text-align: left;'>" + "R: " + str(value[1]) + "&#10;" + "M: " + str(value[0]) + "</td>"
+                    else:
+                        html_table += "<td style='border: 1px solid black; padding: 8px; text-align: left;'>" + "R: " + str(value[1]) + "<br>" + "M: " + str(value[0]) + "</td>"
                 else:
                     html_table += "<td style='border: 1px solid black; padding: 8px; text-align: left;'>" + str(value) + "</td>"
             html_table += "</tr>\n"
