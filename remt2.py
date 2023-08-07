@@ -40,8 +40,8 @@ class Enzyme:
         self.enzyme = enzyme
         self.ref = ref
         self.locus = locus
-        self.range = set()
-        self.matches = set()
+        self.range = list()
+        self.matches = list()
 
 class Methyl(Enzyme):
     pass
@@ -292,39 +292,7 @@ for contig in contigs:
                                         if args.coords:
                                             temp["Coords"] = [str(m.start) + ", " + str(m.end), str(r.start) + ", " + str(r.end)]
 
-                                        r.matches.append([m.ref, weighted_score, temp, r.ref])
-                                        r.matches.sort(key = lambda x: x[1], reverse = True)
-
-    auction = {}
-    while True:
-        changes = 0
-        for res in r_enzs:
-            r = r_enzs[res]
-            #If the re has a match remaining
-            if len(r.matches) > 0:
-                mref = r.matches[0][0]
-                #Add match to auction
-                if mref not in auction:
-                    auction[mref] = [r.matches[0]]
-                else:
-                    auction[mref].append(r.matches[0])
-                    #Sort so highest value first, descending. Using a queue
-                    auction[mref].sort(key = lambda x: x[1], reverse = True)
-        #Iterate over auction
-        for key in auction:
-            if len(auction[key]) > 1:
-                changes += 1
-                for i in range(len(auction[key]) - 1, 0, -1):
-                    temp = auction[key].pop(i)
-                    if r_enzs[temp[3]].matches:
-                        r_enzs[temp[3]].matches.pop(0)
-        if changes == 0:
-            break
-    
-    #Populate c.hits
-    for key in auction:
-        m = auction[key][0]
-        c.hits[m[3]] = m[2]
+                                        c.hits[r.ref] = temp
 
 hits = {}
 for c in contigs:
