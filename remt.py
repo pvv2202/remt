@@ -8,8 +8,7 @@ parser = argparse.ArgumentParser(description='Generate HTML table from JSON or T
 parser.add_argument('-i', type=str, default=None, required=True, help='File input (JSON or TSV)')
 parser.add_argument('-o', type = str, default = "def", required = False, help='File output name (JSON and HTML)')
 parser.add_argument('--coords', default = None, required = False, action='store_true', help='Include re/mt start and end points')
-parser.add_argument('--shortest', default = None, required = False, action='store_true', help='Filter to only show the shortest re/mt pair for each exact match')
-parser.add_argument('--shortest_all', default = None, required = False, action='store_true', help='Filter to show only the shortest re/mt pair for all matches on a contig for a specific re')
+parser.add_argument('--shortest', default = None, required = False, action='store_true', help='Filter to show only the shortest re/mt pair for all matches on a contig for a specific re')
 parser.add_argument('--ignore_short', default = None, required = False, action='store_true', help='Filter to ignore MTs with rec seq <3 bp')
 parser.add_argument('--remove_split', default = None, required = False, action='store_true', help='Filter to show only the shortest re/mt pair for all matches on a contig for a specific re')
 parser.add_argument('--min_distance', default = None, required = False, type = int, help='Filter by distance')
@@ -92,24 +91,6 @@ def match(mseq, rseq):
                 return True
 
         return False
-
-#Filter so that only the shortest distance re/methyl match is provided
-def filterShortest(hits):
-    updated_hits = list()
-    to_remove = set()
-
-    for i, check in enumerate(hits):
-        for j, other in enumerate(hits):
-            if i != j and check["Contig"] == other["Contig"] and check["MethylSeq"] == other["MethylSeq"] and check["RESeq"] == other["RESeq"]:
-                #Adding the index of the hit to remove
-                if check["Distance"] > other["Distance"]:
-                    to_remove.add(i)
-                else:
-                    to_remove.add(j)
-    
-    updated_hits = [hit for i, hit in enumerate(hits) if i not in to_remove]
-
-    return updated_hits
 
 def filterAll(hits):
     updated_hits = list()
@@ -215,11 +196,7 @@ for c in contigs:
 
                 hits.append(temp)
 
-#Argument Handling
 if args.shortest:
-    hits = filterShortest(hits)
-
-if args.shortest_all:
     hits = filterAll(hits)
 
 if args.min_distance is not None:

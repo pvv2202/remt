@@ -205,7 +205,12 @@ for index, item in data.iterrows():
             
             if args.filter_n:
                 for s in seq:
-                    if "NNN" in s or not args.ignore_nonspec or len(s) < 3:
+                    if "NNN" in s:
+                        seq.remove(s)
+            
+            if args.ignore_nonspec:
+                for s in seq:
+                    if len(s) < 3:
                         seq.remove(s)
 
             if "EnzType:" in desc and len(seq) > 0:
