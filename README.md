@@ -16,7 +16,10 @@ The second will be annotated by contig. For example:
 
 `enum_report.py -i annotated_input.gb --by contig --length --topology -o output_by_contig.tsv`
 
-After that, both reports can be fed into remt2. For example:
+Note that remt requires the domain_descriptions, start, end, score, length, and topology fields to function. Domain or contig tsv reports that do not
+contain this information will lead to errors. 
+
+After generating, both reports can be fed into remt2. For example:
 
 `python remt2.py -i by_domain.tsv  by_contig.tsv -o output`
 *For inputs, by domain goes first and by contig goes second
