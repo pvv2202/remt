@@ -3,17 +3,16 @@ import argparse
 import domainator
 import pandas as pd
 import numpy as np
-from itertools import product
-from domainator.utils import parse_seqfiles, DomainatorCDS
+import re
+import os
 import matplotlib.pyplot as plt
 import seaborn as sns
+from itertools import product
+from domainator.utils import parse_seqfiles, DomainatorCDS
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from Bio import SeqIO
-import re
-import os
 
-#TODO: PLOT GRAPH OF DISTANCE OF HITS
 
 parser = argparse.ArgumentParser(description='Generate HTML table from JSON or TSV data.')
 parser.add_argument('-i', type=str, nargs='+', default=None, required=True, help='Annotated genbank file input')
@@ -388,47 +387,71 @@ if hits:
         header_keys = []
 
     # Generate the HTML table with centered content
-    html_table = "<table id='myTable' style='border-collapse: collapse; font-family: Courier New, monospace; font-size: 0.7em'>\n"
+    html_table = "<table id='myTable' style='border-collapse: collapse; font-family: Courier New, monospace; font-size: 0.7em; width: 100%'>\n"
     # Create table header
     html_table += "<thead><tr>"
-    for key in header_keys:
-        html_table += "<th style='border: 1px solid black; padding: 8px; text-align: left;'>" + str(key) + "</th>"
+    for i, key in enumerate(header_keys):
+        html_table += f"<th class='col-{i}' style='border: 1px solid black; padding: 8px; text-align: left;' onclick='toggleColumnWidth({i})'>" + str(key) + "</th>"
     html_table += "</tr></thead>\n"
     # Create table rows
     html_table += "<tbody>"
     for item in hits.values():
         if isinstance(item, dict):
             html_table += "<tr>"
-            for key, value in item.items():
-                if key == "Alignment" or key == "Sequences" or key == "Coords" or key == "Scores" or key == "Types" or key == "Domains" or key == "Loci" or key == "Translation":
+            for i, (key, value) in enumerate(item.items()):
+                cell_content = ""
+                if key in ["Alignment", "Sequences", "Coords", "Scores", "Types", "Domains", "Loci", "Translation"]:
                     if args.excel:
-                        html_table += "<td style='border: 1px solid black; padding: 8px; text-align: left;'>" + "R: " + str(value[1]) + "&#10;" + "M: " + str(value[0]) + "</td>"
+                        cell_content = "R: " + str(value[1]) + "&#10;" + "M: " + str(value[0])
                     else:
-                        html_table += "<td style='border: 1px solid black; padding: 8px; text-align: left;'>" + "R: " + str(value[1]) + "<br>" + "M: " + str(value[0]) + "</td>"
+                        cell_content = "R: " + str(value[1]) + "<br>" + "M: " + str(value[0])
                 else:
-                    html_table += "<td style='border: 1px solid black; padding: 8px; text-align: left;'>" + str(value) + "</td>"
+                    cell_content = str(value)
+                html_table += f"<td class='col-{i}' style='border: 1px solid black; padding: 8px; text-align: left;'>{cell_content}</td>"
             html_table += "</tr>\n"
     html_table += "</tbody></table>"
 
     output_filename = args.o + ".html"
 
-    # Check if the file already exists
-    if os.path.exists(output_filename):
-        mode = "w"  # If the file exists, open it in write mode to overwrite
-    else:
-        mode = "a"  # If the file doesn't exist, open it in append mode
-
-    with open(output_filename, mode) as file:
+    # Write the HTML table to the file
+    with open(output_filename, 'w') as file:
         file.write(html_table)
 
     html_script = """
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.11.3/css/jquery.dataTables.min.css">
     <script src="https://cdn.datatables.net/1.11.3/js/jquery.dataTables.min.js"></script>
+    <style>
+        .collapsed-column {
+            width: 10px !important;
+            max-width: 10px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        table.dataTable td.collapsed-column, table.dataTable th.collapsed-column {
+            width: 10px;
+            max-width: 10px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+    </style>
     <script>
         $(document).ready(function() {
             $('#myTable').DataTable();
+
+            // Add click event to the whole table to toggle column width
+            $('#myTable').on('click', 'td, th', function() {
+                var index = $(this).index();
+                toggleColumnWidth(index);
+            });
         });
+
+        function toggleColumnWidth(index) {
+            var columnClass = '.col-' + index;
+            $(columnClass).toggleClass('collapsed-column');
+        }
     </script>
     """
     # Append the JavaScript code to the HTML file
