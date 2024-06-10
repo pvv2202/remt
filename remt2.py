@@ -6,18 +6,24 @@ import numpy as np
 from itertools import product
 from domainator.utils import parse_seqfiles, DomainatorCDS
 import matplotlib.pyplot as plt
+import seaborn as sns
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from Bio import SeqIO
 import re
 import os
 
+#TODO: PLOT GRAPH OF DISTANCE OF HITS
+
 parser = argparse.ArgumentParser(description='Generate HTML table from JSON or TSV data.')
 parser.add_argument('-i', type=str, nargs='+', default=None, required=True, help='Annotated genbank file input')
 parser.add_argument('-o', type=str, default="def", required=False, help='File output name (HTML)')
 parser.add_argument('--coords', default=True, required=False, action='store_true', help='Include coords')
 parser.add_argument('--translation', default=True, required=False, action='store_true', help='Include protein sequence')
+parser.add_argument('--paper', default=True, required=False, action='store_true', help='Include title of paper sequence is from')
 parser.add_argument('--stats', default=None, required=False, action='store_true', help='Print stats to terminal')
+parser.add_argument('--histogram', nargs='?', default=None, const=10, type=int, help='Output histogram of system distances. Specify bin size after. Default is 10')
+parser.add_argument('--kde', default=None, required=False, action='store_true', help='Output kde of system distances (clipped to display positive values only)')
 parser.add_argument('--excel', default=None, required=False, action='store_true', help='Make results excel friendly (default is HTML friendly)')
 parser.add_argument('--filter_n', default=None, required=False, action='store_true', help='Remove hits with a lot of Ns')
 parser.add_argument('--ignore_nonspec', default=None, required=False, action='store_true', help='Filter to ignore MTs with rec seq < 3 bp (nonspecific)')
@@ -27,10 +33,11 @@ parser.add_argument('--in_range', default=5000, required=False, type=int, help='
 args = parser.parse_args()
 
 class Contig:
-    def __init__(self, ref, length, circular):
+    def __init__(self, ref, length, topology, paper):
         self.ref = ref
         self.length = length
-        self.circular = circular
+        self.topology = topology
+        self.paper = paper
         self.fusions = 0
         self.mts = {}
         self.res = {}
@@ -87,17 +94,13 @@ def calculate_similarity(string1, string2):
 
     return len(intersection) / len(union)
 
-def distance(A_start, A_end, B_start, B_end, circ, contig_length):
-    circularity = 0
+def distance(A_start, A_end, B_start, B_end, topology, contig_length):
+    circular_distance = 0
 
-    if circ:
-        circularity = min(A_start, B_start) + contig_length - max(A_end, B_end)
+    if topology == "circular":
+        circular_distance = contig_length - (max(A_end, B_end) - min(A_start, B_start)) # Total length - distance between start and end
 
-    toReturn = max(0, B_start - A_end, A_start - B_end)
-    if circ and circularity < toReturn:
-        toReturn = circularity
-
-    return toReturn
+    return min(max(0, B_start - A_end, A_start - B_end), circular_distance) # Return max b/c one of the start/end differences will always be negative. Then if circ dist is less return that
 
 def iupac_match(char1, char2):
     if re.search(iupac[char1], char2):
@@ -176,7 +179,14 @@ if args.i is not None:
 
             contig_id = rec.id
             if contig_id not in contigs:
-                contigs[contig_id] = Contig(contig_id, len(rec.seq), rec.annotations['topology'])
+                contigs[contig_id] = (
+                    Contig(
+                        ref=contig_id,
+                        length=len(rec.seq),
+                        topology=rec.annotations['topology'],
+                        paper=rec.annotations['references'][0].title
+                    )
+                )
 
             desc = domain_features.qualifiers['description'][0]
             score = domain_features.qualifiers['score'][0]
@@ -245,19 +255,14 @@ else:
 
 print("\r")
 print("Finding Systems")
-for i, contig in enumerate(contigs):
+for i, c in enumerate(contigs.values()):
     print(f'{int(i / len(contigs) * 100)}%', end='\r')
-    c = contigs[contig]
-    methyls = c.mts
-    r_enzs = c.res
     # For each restriction enzyme and methyltransferase
-    for res in r_enzs:
-        r = r_enzs[res]
+    for r in c.res.values():
         for rseq in r.seq:
-            for mts in methyls:
-                m = methyls[mts]
+            for m in c.mts.values():
                 for mseq in m.seq:
-                    dist = distance(min(r.start, r.end), max(r.start, r.end), min(m.start, m.end), max(m.start, m.end), c.circular, c.length)
+                    dist = distance(min(r.start, r.end), max(r.start, r.end), min(m.start, m.end), max(m.start, m.end), c.topology, c.length)
                     # Add any re/mts within specified range
                     if args.in_range and dist < args.in_range:
                         m.range.append(f'{r.domain}: {r.seq}')
@@ -274,10 +279,10 @@ for i, contig in enumerate(contigs):
                                 #Doing a better job getting the score
                                 weighted_score =  round((asim + sim) * score) + round(1000/dist) if dist > 0 else 1000
 
-                                if dist < 10000 or (asim == 1 and r.score > 80 and m.score > 80):
+                                if asim == 1 and r.score > 80 and m.score > 80:
                                     if r.ref not in c.hits or weighted_score > c.hits[r.ref]["Score"]:
                                         temp = {
-                                            "Contig": contig,
+                                            "Contig": c.ref,
                                             "Types": [m.enzyme, r.enzyme],
                                             "Domains": [m.domain, r.domain],
                                             "Sequences": [mseq, rseq],
@@ -298,11 +303,14 @@ for i, contig in enumerate(contigs):
                                             for rt_in_range in m.range:
                                                 temp["RE within " + str(args.in_range) + " bp"] = rt_in_range
 
+                                        if args.coords:
+                                            temp["Coords"] = [str(m.start) + ", " + str(m.end), str(r.start) + ", " + str(r.end)]
+
                                         if args.translation:
                                             temp["Translation"] = [m.translation, r.translation]
 
-                                        if args.coords:
-                                            temp["Coords"] = [str(m.start) + ", " + str(m.end), str(r.start) + ", " + str(r.end)]
+                                        if args.paper:
+                                            temp["Paper"] = c.paper
 
                                         c.hits[r.ref] = temp
 
@@ -325,9 +333,7 @@ if args.stats:
     hit_stats = []
     re_only = []
 
-    for contig in contigs:
-        c = contigs[contig]
-
+    for c in contigs.values():
         if (len(c.res) > 0 and len(c.mts) > 0) or c.fusions > 0:
             num_both += 1
             curr = c.fusions + len(c.hits)
@@ -353,6 +359,23 @@ if args.stats:
     print("Num None: " + str(num_none))
     print("Num Only RE: " + str(num_only_re))
     print("Num Only MT: " + str(num_only_mt))
+
+if args.histogram is not None or args.kde:
+    distances = [hit["Distance"] for hit in hits.values()]
+    if args.histogram:
+        # Plot histogram
+        plt.hist(distances, bins=args.histogram, alpha=0.75, edgecolor='black', density=False)
+        plt.title('System Distances')
+        plt.xlabel('Distance')
+        plt.ylabel('Count')
+        plt.show()
+    if args.kde:
+        # Plot KDE
+        sns.kdeplot(distances, fill=True, clip=(0, None))
+        plt.title('KDE of Distances')
+        plt.xlabel('Distance')
+        plt.ylabel('Density')
+        plt.show()
 
 if hits:
     # Get the keys from the first dictionary in hits
