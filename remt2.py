@@ -12,9 +12,9 @@ from domainator.utils import parse_seqfiles, DomainatorCDS
 from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from Bio import SeqIO
+from numba import jit
 
-
-parser = argparse.ArgumentParser(description='Generate HTML table from JSON or TSV data.')
+parser = argparse.ArgumentParser(description='Generate HTML table from annotated GenBank file.')
 parser.add_argument('-i', type=str, nargs='+', default=None, required=True, help='Annotated genbank file input')
 parser.add_argument('-o', type=str, default="def", required=False, help='File output name (HTML)')
 parser.add_argument('--coords', default=True, required=False, action='store_true', help='Include coords')
@@ -66,23 +66,31 @@ class RE(Enzyme):
 #Storing prefixes, iupac, primes
 prefixes = {"M.", "M1.", "M2.", "M3.", "M4."}
 
+# Define IUPAC codes
 iupac = {
-    'A': '[A]',
-    'C': '[C]',
-    'G': '[G]',
-    'T': '[T]',
-    'R': '[AG]',
-    'Y': '[CT]',
-    'S': '[GC]',
-    'W': '[AT]',
-    'K': '[GT]',
-    'M': '[AC]',
-    'B': '[CGTSYK]',
-    'D': '[AGTWRK]',
-    'H': '[ACTMWY]',
-    'V': '[ACGMRS]',
-    'N': '[ACGTVHDBMKWSR]'
+    'A': 'A',
+    'C': 'C',
+    'G': 'G',
+    'T': 'T',
+    'R': 'AG',
+    'Y': 'CT',
+    'S': 'GC',
+    'W': 'AT',
+    'K': 'GT',
+    'M': 'AC',
+    'B': 'CGT',
+    'D': 'AGT',
+    'H': 'ACT',
+    'V': 'ACG',
+    'N': 'ACGT'
 }
+
+# Preprocess the IUPAC codes into a lookup table. 90 x 90 b/c ord(Y) is 89. Using ord makes indexing easier
+iupac_lookup = np.zeros((90, 90), dtype=np.bool_)
+
+for key, value in iupac.items():
+    for char in value:
+        iupac_lookup[ord(key), ord(char)] = True
 
 def calculate_similarity(string1, string2):
     set1 = set(string1)
@@ -93,6 +101,7 @@ def calculate_similarity(string1, string2):
 
     return len(intersection) / len(union)
 
+@jit(nopython=True)
 def distance(A_start, A_end, B_start, B_end, topology, contig_length):
     circular_distance = 0
 
@@ -101,62 +110,75 @@ def distance(A_start, A_end, B_start, B_end, topology, contig_length):
 
     return min(max(0, B_start - A_end, A_start - B_end), circular_distance) # Return max b/c one of the start/end differences will always be negative. Then if circ dist is less return that
 
-def iupac_match(char1, char2):
-    if re.search(iupac[char1], char2):
-        return True
-    return False
+@jit(nopython=True)
+def iupac_match_numba(char1, char2, iupac_lookup):
+    return iupac_lookup[ord(char1), ord(char2)] # Just look up from table
 
-def smith_waterman(sequence1, sequence2, exact_match_score = 3, match_score = 1, mismatch_score = -1, gap_penalty = -2):
-    #Initialize the score matrix and traceback matrix
+@jit(nopython=True)
+def smith_waterman(sequence1, sequence2, exact_match_score, match_score, mismatch_score, gap_penalty, iupac_lookup):
+    # Initialize the score matrix and traceback matrix
     rows = len(sequence1) + 1
     cols = len(sequence2) + 1
     score_matrix = np.zeros((rows, cols))
-    traceback_matrix = np.zeros((rows, cols), dtype=int)
+    traceback_matrix = np.zeros((rows, cols), dtype=np.int32)
 
-    #Fill the score and traceback matrices
-    for i, j in product(range(1, rows), range(1, cols)):
-        if sequence1[i - 1] == sequence2[j - 1]:
-            to_add = exact_match_score
-        elif iupac_match(sequence1[i - 1], sequence2[j - 1]):
-            to_add = match_score
-        else:
-            to_add = mismatch_score
-        match = score_matrix[i - 1, j - 1] + to_add
-        delete = score_matrix[i - 1, j] + gap_penalty
-        insert = score_matrix[i, j - 1] + gap_penalty
-        score_matrix[i, j] = max(0, match, delete, insert)
+    # Fill the score and traceback matrices
+    for i in range(1, rows):
+        for j in range(1, cols):
+            if sequence1[i - 1] == sequence2[j - 1]: # If the characters are the same
+                to_add = exact_match_score
+            elif iupac_match_numba(sequence1[i - 1], sequence2[j - 1], iupac_lookup): # If they are an iupac match
+                to_add = match_score
+            else: # If they mismatch
+                to_add = mismatch_score
+            match = score_matrix[i - 1, j - 1] + to_add # Match, so move up in both sequences
+            delete = score_matrix[i - 1, j] + gap_penalty # Move up one in sequence 2
+            insert = score_matrix[i, j - 1] + gap_penalty # Move up one in sequence 1
+            score_matrix[i, j] = max(0, match, delete, insert)
 
-        if score_matrix[i, j] == match:
-            traceback_matrix[i, j] = 1  # Diagonal
-        elif score_matrix[i, j] == delete:
-            traceback_matrix[i, j] = 2  # Up
-        elif score_matrix[i, j] == insert:
-            traceback_matrix[i, j] = 3  # Left
+            if score_matrix[i, j] == match:
+                traceback_matrix[i, j] = 1  # Diagonal
+            elif score_matrix[i, j] == delete:
+                traceback_matrix[i, j] = 2  # Up
+            elif score_matrix[i, j] == insert:
+                traceback_matrix[i, j] = 3  # Left
 
-    #Find the cell with the maximum score in the score matrix
+    # Find the cell with the maximum score in the score matrix
     max_score = np.max(score_matrix)
-    max_i, max_j = np.unravel_index(np.argmax(score_matrix), score_matrix.shape)
+    max_i, max_j = 0, 0
+    for i in range(rows):
+        for j in range(cols):
+            if score_matrix[i, j] == max_score:
+                max_i, max_j = i, j
+                break
 
-    #Traceback to find the alignment
-    aligned_seq1 = ""
-    aligned_seq2 = ""
+    # Traceback to find the alignment
+    aligned_seq1 = []
+    aligned_seq2 = []
     i, j = max_i, max_j
 
     while i > 0 and j > 0 and score_matrix[i, j] > 0:
-        if traceback_matrix[i, j] == 1:  #Diagonal
-            aligned_seq1 = sequence1[i - 1] + aligned_seq1
-            aligned_seq2 = sequence2[j - 1] + aligned_seq2
+        if traceback_matrix[i, j] == 1:  # Diagonal
+            aligned_seq1.append(sequence1[i - 1])
+            aligned_seq2.append(sequence2[j - 1])
             i -= 1
             j -= 1
-        elif traceback_matrix[i, j] == 2:  #Up, gap in sequence 2
-            aligned_seq1 = sequence1[i - 1] + aligned_seq1
-            aligned_seq2 = "-" + aligned_seq2
+        elif traceback_matrix[i, j] == 2:  # Up, gap in sequence 2
+            aligned_seq1.append(sequence1[i - 1])
+            aligned_seq2.append('-')
             i -= 1
-        elif traceback_matrix[i, j] == 3:  #Left, gap in sequence 1
-            aligned_seq1 = "-" + aligned_seq1
-            aligned_seq2 = sequence2[j - 1] + aligned_seq2
+        elif traceback_matrix[i, j] == 3:  # Left, gap in sequence 1
+            aligned_seq1.append('-')
+            aligned_seq2.append(sequence2[j - 1])
             j -= 1
 
+    aligned_seq1.reverse()
+    aligned_seq2.reverse()
+
+    return ''.join(aligned_seq1), ''.join(aligned_seq2), max_score
+
+def smith_waterman_with_iupac(sequence1, sequence2, exact_match_score=3, match_score=1, mismatch_score=-1, gap_penalty=-2):
+    aligned_seq1, aligned_seq2, max_score = smith_waterman(sequence1, sequence2, exact_match_score, match_score, mismatch_score, gap_penalty, iupac_lookup)
     return aligned_seq1, aligned_seq2, max_score
 
 contigs = {}
@@ -269,7 +291,7 @@ for i, c in enumerate(contigs.values()):
 
                     # If mseq <= rseq (if greater cannot block every site), run smith-waterman
                     if len(mseq) <= len(rseq):
-                        aligned_mseq, aligned_rseq, score = smith_waterman(mseq, rseq)
+                        aligned_mseq, aligned_rseq, score = smith_waterman_with_iupac(mseq, rseq)
                         #Filtering by score, length of rseq, absolute value of mseq
                         if score > 2 and len(aligned_rseq) > 3 and (len(aligned_mseq) == len(mseq)):
                             sim = calculate_similarity(mseq, rseq)
