@@ -19,7 +19,6 @@ parser.add_argument('-i', type=str, nargs='+', default=None, required=True, help
 parser.add_argument('-o', type=str, default="def", required=False, help='File output name (HTML)')
 parser.add_argument('--coords', default=True, required=False, action='store_true', help='Include coords')
 parser.add_argument('--translation', default=True, required=False, action='store_true', help='Include protein sequence')
-parser.add_argument('--paper', default=True, required=False, action='store_true', help='Include title of paper sequence is from')
 parser.add_argument('--stats', default=None, required=False, action='store_true', help='Print stats to terminal')
 parser.add_argument('--histogram', nargs='?', default=None, const=10, type=int, help='Output histogram of system distances. Specify bin size after. Default is 10')
 parser.add_argument('--kde', default=None, required=False, action='store_true', help='Output kde of system distances (clipped to display positive values only)')
@@ -32,11 +31,11 @@ parser.add_argument('--in_range', default=5000, required=False, type=int, help='
 args = parser.parse_args()
 
 class Contig:
-    def __init__(self, ref, length, topology, paper):
+    def __init__(self, ref, length, topology, strain):
         self.ref = ref
         self.length = length
         self.topology = topology
-        self.paper = paper
+        self.strain = strain
         self.fusions = 0
         self.mts = {}
         self.res = {}
@@ -205,7 +204,7 @@ if args.i is not None:
                         ref=contig_id,
                         length=len(rec.seq),
                         topology=rec.annotations['topology'],
-                        paper=rec.annotations['references'][0].title
+                        strain=rec.annotations['organism']
                     )
                 )
 
@@ -304,6 +303,7 @@ for i, c in enumerate(contigs.values()):
                                     if r.ref not in c.hits or weighted_score > c.hits[r.ref]["Score"]:
                                         temp = {
                                             "Contig": c.ref,
+                                            "Strain": c.strain,
                                             "Types": [m.enzyme, r.enzyme],
                                             "Domains": [m.domain, r.domain],
                                             "Sequences": [mseq, rseq],
@@ -329,9 +329,6 @@ for i, c in enumerate(contigs.values()):
 
                                         if args.translation:
                                             temp["Translation"] = [m.translation, r.translation]
-
-                                        if args.paper:
-                                            temp["Paper"] = c.paper
 
                                         c.hits[r.ref] = temp
 
