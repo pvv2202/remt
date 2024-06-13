@@ -183,95 +183,93 @@ def smith_waterman_with_iupac(sequence1, sequence2, exact_match_score=3, match_s
 contigs = {}
 
 # Populating contigs from input file
-if args.i is not None:
-    print("Reading Input File")
-    records = parse_seqfiles(args.i)
-    print("Populating Contigs")
-    for i, rec in enumerate(records): # Each rec is a contig
-        print(f"Reading Contig {i}", end='\r')
-        count = 0
-        cds_features = DomainatorCDS.list_from_contig(rec)
-        for feature in cds_features:
-            if len(feature.domain_features) == 0: # Skip if domainator has no annotations
-                continue
+print("Reading Input File")
+records = parse_seqfiles(args.i)
 
-            domain_features = feature.domain_features[0]
+print("Populating Contigs")
+for i, rec in enumerate(records):  # Each rec is a contig
+    print(f"Reading Contig {i}", end='\r')
+    count = 0
+    cds_features = DomainatorCDS.list_from_contig(rec)
 
-            contig_id = rec.id
-            if contig_id not in contigs:
-                contigs[contig_id] = (
-                    Contig(
-                        ref=contig_id,
-                        length=len(rec.seq),
-                        topology=rec.annotations['topology'],
-                        strain=rec.annotations['organism']
-                    )
+    for feature in cds_features:
+        if len(feature.domain_features) == 0:
+            continue
+
+        domain_features = feature.domain_features[0]
+
+        contig_id = rec.id
+        if contig_id not in contigs:
+            contigs[contig_id] = (
+                Contig(
+                    ref=contig_id,
+                    length=len(rec.seq),
+                    topology=rec.annotations['topology'],
+                    strain=rec.annotations['organism']
                 )
+            )
 
-            desc = domain_features.qualifiers['description'][0]
-            score = domain_features.qualifiers['score'][0]
+        desc = domain_features.qualifiers['description'][0]
+        score = domain_features.qualifiers['score'][0]
 
-            if args.min_score is None or score >= args.min_score: # Filter by score
-                # Filtering out to only consider applicable enzymes
-                if args.stats and "enzyme/methyltransferase" in desc:
-                    contigs[contig_id].fusions += 1
-                elif all(keyword not in desc for keyword in ["control protein", "homing endonuclease", "subunit", "helicase", "nicking endonuclease", "orphan", "methyl-directed", "enzyme/methyltransferase"]) and "RecSeq:" in desc:
-                    # Extracting the RecSeq
-                    recseq_start = desc.find("RecSeq:") + len("RecSeq:")
-                    recseq_end = desc.find(";", recseq_start)
-                    seq = desc[recseq_start:recseq_end].split(", ")
-                    for s in seq:
-                        if "-" in s:
+        if args.min_score is None or score >= args.min_score: # Filter by score
+            # Filtering out to only consider applicable enzymes
+            if args.stats and "enzyme/methyltransferase" in desc:
+                contigs[contig_id].fusions += 1
+            elif all(keyword not in desc for keyword in ["control protein", "homing endonuclease", "subunit", "helicase", "nicking endonuclease", "orphan", "methyl-directed", "enzyme/methyltransferase"]) and "RecSeq:" in desc:
+                # Extracting the RecSeq
+                recseq_start = desc.find("RecSeq:") + len("RecSeq:")
+                recseq_end = desc.find(";", recseq_start)
+                seq = desc[recseq_start:recseq_end].split(", ")
+                for s in seq:
+                    if "-" in s:
+                        seq.remove(s)
+                        continue
+                    if args.filter_n:
+                        if "NNN" in s:
                             seq.remove(s)
                             continue
-                        if args.filter_n:
-                            if "NNN" in s:
-                                seq.remove(s)
-                                continue
-                        if args.ignore_nonspec:
-                            if len(s) < 3:
-                                seq.remove(s)
+                    if args.ignore_nonspec:
+                        if len(s) < 3:
+                            seq.remove(s)
 
-                    # Extracting the EnzType
-                    if "EnzType:" in desc and len(seq) > 0:
-                        enz_start = desc.find("EnzType:") + len("EnzType:")
-                        enz_end = desc.find(";", enz_start)
-                        enz_type = desc[enz_start:enz_end]
+                # Extracting the EnzType
+                if "EnzType:" in desc and len(seq) > 0:
+                    enz_start = desc.find("EnzType:") + len("EnzType:")
+                    enz_end = desc.find(";", enz_start)
+                    enz_type = desc[enz_start:enz_end]
 
-                        # If MT/RE, respond accordingly - count is used as the reference number
-                        name = domain_features.qualifiers['name'][0]
-                        if any(name.startswith(prefix) for prefix in prefixes):
-                            contigs[contig_id].mts[count] = (
-                                Methyl(
-                                   seq=seq,
-                                   start=domain_features.location.start,
-                                   end=domain_features.location.end,
-                                   score=score,
-                                   domain=name,
-                                   enzyme=enz_type,
-                                   ref=count,
-                                   locus=domain_features.qualifiers['cds_id'][0],
-                                   translation=feature.feature.qualifiers['translation'][0]
-                                   )
-                            )
-                        else:
-                            contigs[contig_id].res[count] = (
-                                RE(
-                                   seq=seq,
-                                   start=domain_features.location.start,
-                                   end=domain_features.location.end,
-                                   score=score,
-                                   domain=name,
-                                   enzyme=enz_type,
-                                   ref=count,
-                                   locus=domain_features.qualifiers['cds_id'][0],
-                                   translation=feature.feature.qualifiers['translation'][0]
-                                   )
-                            )
-                        count += 1
-else:
-    print('Error: No input file specified.')
-    exit(1)
+                    # If MT/RE, respond accordingly - count is used as the reference number
+                    name = domain_features.qualifiers['name'][0]
+                    if any(name.startswith(prefix) for prefix in prefixes):
+                        contigs[contig_id].mts[count] = (
+                            Methyl(
+                               seq=seq,
+                               start=domain_features.location.start,
+                               end=domain_features.location.end,
+                               score=score,
+                               domain=name,
+                               enzyme=enz_type,
+                               ref=count,
+                               locus=domain_features.qualifiers['cds_id'][0],
+                               translation=feature.feature.qualifiers['translation'][0]
+                               )
+                        )
+                    else:
+                        contigs[contig_id].res[count] = (
+                            RE(
+                               seq=seq,
+                               start=domain_features.location.start,
+                               end=domain_features.location.end,
+                               score=score,
+                               domain=name,
+                               enzyme=enz_type,
+                               ref=count,
+                               locus=domain_features.qualifiers['cds_id'][0],
+                               translation=feature.feature.qualifiers['translation'][0]
+                               )
+                        )
+                    count += 1
 
 print("\r")
 print("Finding Systems")

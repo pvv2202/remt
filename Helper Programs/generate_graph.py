@@ -4,6 +4,8 @@ import seaborn as sns
 import numpy as np
 from domainator.seq_dist import seq_dist
 from domainator.data_matrix import DataMatrix
+import networkx as nx
+import plotly.graph_objects as go
 import io
 from bs4 import BeautifulSoup
 
@@ -57,12 +59,97 @@ else:
     print('Error: No input file specified.')
     exit(1)
 
-if args.i is not None and args.i[0].endswith('.hdf5'):
-    re_matrix = DataMatrix.from_file(f"{args.i[0]}re_simlarity_matrix.hdf5")
-    mt_matrix = DataMatrix.from_file(f"{args.i[0]}mt_simlarity_matrix.hdf5")
-else:
-    print('Error: No input file specified.')
-    exit(1)
+# if args.i is not None and args.i[0].endswith('.hdf5'):
+#     re_matrix = DataMatrix.from_file(f"{args.i[0][:-5]}re_simlarity_matrix.hdf5")
+#     mt_matrix = DataMatrix.from_file(f"{args.i[0][:-5]}mt_simlarity_matrix.hdf5")
+# elif html not in args.i:
+#     print('Error: No input file specified.')
+#     exit(1)
 
-print(re_matrix.columns)
+# Create a graph
+G = nx.Graph()
 
+# Add nodes for re and mt sequences
+for re in re_matrix.columns:
+    G.add_node(re.split(":")[2], type='re')
+for mt in mt_matrix.columns:
+    G.add_node(mt.split(":")[2], type='mt')
+
+# Add edges with weights from the similarity matrices
+for i, re1 in enumerate(re_matrix.columns):
+    for j, re2 in enumerate(re_matrix.rows):
+        if i != j:
+            weight = re_matrix.data[i, j]  # Assuming the data matrix is symmetrical
+            if weight > 0:
+                G.add_edge(re1.split(":")[2], re2.split(":")[2], weight=weight)
+
+for i, mt1 in enumerate(mt_matrix.columns):
+    for j, mt2 in enumerate(mt_matrix.rows):
+        if i != j:
+            weight = mt_matrix.data[i, j]  # Assuming the data matrix is symmetrical
+            if weight > 0:
+                G.add_edge(mt1.split(":")[2], mt2.split(":")[2], weight=weight)
+
+pos = nx.spring_layout(G)
+
+# Extract edges and weights
+edge_x = []
+edge_y = []
+edge_weights = []
+
+for edge in G.edges(data=True):
+    x0, y0 = pos[edge[0]]
+    x1, y1 = pos[edge[1]]
+    edge_x.append(x0)
+    edge_x.append(x1)
+    edge_x.append(None)
+    edge_y.append(y0)
+    edge_y.append(y1)
+    edge_y.append(None)
+    edge_weights.append(edge[2]['weight'])
+
+edge_trace = go.Scatter(
+    x=edge_x, y=edge_y,
+    line=dict(width=0.5, color='#888'),
+    hoverinfo='none',
+    mode='lines')
+
+# Extract nodes and names
+node_x = []
+node_y = []
+node_text = []
+
+for node in G.nodes():
+    x, y = pos[node]
+    node_x.append(x)
+    node_y.append(y)
+    node_text.append(node)
+
+node_trace = go.Scatter(
+    x=node_x, y=node_y,
+    mode='markers+text',
+    text=node_text,
+    textposition="bottom center",
+    hoverinfo='text',
+    marker=dict(
+        showscale=False,
+        color='skyblue',
+        size=10,
+        line_width=2))
+
+fig = go.Figure(data=[edge_trace, node_trace],
+             layout=go.Layout(
+                title='<br>Enzyme Graph',
+                titlefont_size=16,
+                showlegend=False,
+                hovermode='closest',
+                margin=dict(b=20,l=5,r=5,t=40),
+                annotations=[ dict(
+                    showarrow=False,
+                    xref="paper", yref="paper",
+                    x=0.005, y=-0.002 ) ],
+                xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
+                )
+
+fig.show()
