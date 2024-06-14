@@ -1,5 +1,6 @@
 import argparse
 import csv
+import json
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-i', type=str, default=None, required=True, help='File input (JSON or TSV)')
