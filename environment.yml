@@ -5,12 +5,9 @@ dependencies:
   - python=3.11
   - numba
   - pandas
-  - jupyter
   - ncbi-datasets-cli
   - diamond
   - networkx
   - plotly
-  - selenium
-  - webdriver-manager
   - pyppeteer
 prefix: /Users/pvandervort/miniconda3/envs/remt
