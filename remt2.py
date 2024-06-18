@@ -3,6 +3,7 @@ import numpy as np
 import pickle
 import matplotlib.pyplot as plt
 import seaborn as sns
+import gb_io
 from domainator.utils import parse_seqfiles, DomainatorCDS
 from numba import jit
 
@@ -174,99 +175,203 @@ def smith_waterman_with_iupac(sequence1, sequence2, exact_match_score=3, match_s
 
 contigs = {}
 
-if args.i.endswith('.gb'):
-    # Populating contigs from input file
-    print("Reading Input File")
-    records = parse_seqfiles([args.i])
+def extract_domainator_cds(record):
+    cdss = {}
+    for feature in record.features:
+        qualifiers = {q.key: q.value for q in feature.qualifiers}
+        if "cds_id" not in qualifiers:
+            continue
+        if qualifiers["cds_id"] not in cdss:
+            cdss[qualifiers["cds_id"]] = {}
+        dict = cdss[qualifiers["cds_id"]]
+        if feature.kind == "CDS":
+            dict["translation"] = qualifiers["translation"]
+        elif feature.kind == "Domainator":
+            dict["start"] = feature.location.start
+            dict["end"] = feature.location.end
+            dict["desc"] = qualifiers["description"]
+            dict["name"] = qualifiers["name"]
+            dict["score"] = qualifiers["score"]
 
-    print("Populating Contigs")
-    for i, rec in enumerate(records):  # Each rec is a contig
+    temp = cdss.copy()
+    for id, cds in cdss.items():
+        if len(cds.keys()) < 2:
+            del temp[id]
+    return temp
+
+print("Populating Contigs")
+if args.i.endswith('.gb'):
+    for i, record in enumerate(gb_io.iter(args.i)):
         print(f"Reading Contig {i}", end='\r')
         count = 0
-        cds_features = DomainatorCDS.list_from_contig(rec)
-
-        for feature in cds_features:
-            if len(feature.domain_features) == 0:
-                continue
-
-            domain_features = feature.domain_features[0]
-
-            contig_id = rec.id
+        cds_features = extract_domainator_cds(record)
+        for cds_id, feature in cds_features.items():
+            contig_id = record.name
+            desc = feature["desc"].split(";")
             if contig_id not in contigs:
+                strain = desc[3][9:]
                 contigs[contig_id] = (
                     Contig(
                         ref=contig_id,
-                        length=len(rec.seq),
-                        topology=rec.annotations['topology'],
-                        strain=rec.annotations['organism']
+                        length=record.length,
+                        topology= "circular" if record.circular else "linear",
+                        strain=strain
                     )
                 )
 
-            desc = domain_features.qualifiers['description'][0]
-            score = domain_features.qualifiers['score'][0]
+            if args.min_score and feature["score"] < args.min_score:
+                continue
 
-            if args.min_score is None or score >= args.min_score: # Filter by score
-                # Filtering out to only consider applicable enzymes
-                if args.stats and "enzyme/methyltransferase" in desc:
-                    contigs[contig_id].fusions += 1
-                elif all(keyword not in desc for keyword in ["control protein", "homing endonuclease", "subunit", "helicase", "nicking endonuclease", "orphan", "methyl-directed", "enzyme/methyltransferase"]) and "RecSeq:" in desc:
-                    # Extracting the RecSeq
-                    recseq_start = desc.find("RecSeq:") + len("RecSeq:")
-                    recseq_end = desc.find(";", recseq_start)
-                    seq = desc[recseq_start:recseq_end].split(", ")
-                    for s in seq:
-                        if "-" in s:
+            enz_type = desc[0][7:]
+
+            if args.stats and "enzyme/methyltransferase" in enz_type:
+                contigs[contig_id].fusions += 1
+            elif all(keyword not in enz_type for keyword in ["control protein", "homing endonuclease", "subunit", "helicase", "nicking endonuclease", "orphan", "methyl-directed", "enzyme/methyltransferase"]) and "RecSeq:" in desc:
+                # Extracting the RecSeq
+                seq = desc[1][7:].split(", ")
+                for s in seq:
+                    if "-" in s:
+                        seq.remove(s)
+                        continue
+                    if args.filter_n:
+                        if "NNN" in s:
                             seq.remove(s)
                             continue
-                        if args.filter_n:
-                            if "NNN" in s:
-                                seq.remove(s)
-                                continue
-                        if args.ignore_nonspec:
-                            if len(s) < 3:
-                                seq.remove(s)
+                    if args.ignore_nonspec:
+                        if len(s) < 3:
+                            seq.remove(s)
 
-                    # Extracting the EnzType
-                    if "EnzType:" in desc and len(seq) > 0:
-                        enz_start = desc.find("EnzType:") + len("EnzType:")
-                        enz_end = desc.find(";", enz_start)
-                        enz_type = desc[enz_start:enz_end]
+                # Extracting the EnzType
+                if len(seq) == 0:
+                    continue
 
-                        # If MT/RE, respond accordingly - count is used as the reference number
-                        name = domain_features.qualifiers['name'][0]
-                        if any(name.startswith(prefix) for prefix in prefixes):
-                            contigs[contig_id].mts[count] = (
-                                Methyl(
-                                   seq=seq,
-                                   start=domain_features.location.start,
-                                   end=domain_features.location.end,
-                                   score=score,
-                                   domain=name,
-                                   enzyme=enz_type,
-                                   ref=count,
-                                   locus=domain_features.qualifiers['cds_id'][0],
-                                   translation=feature.feature.qualifiers['translation'][0]
-                                   )
-                            )
-                        else:
-                            contigs[contig_id].res[count] = (
-                                RE(
-                                   seq=seq,
-                                   start=domain_features.location.start,
-                                   end=domain_features.location.end,
-                                   score=score,
-                                   domain=name,
-                                   enzyme=enz_type,
-                                   ref=count,
-                                   locus=domain_features.qualifiers['cds_id'][0],
-                                   translation=feature.feature.qualifiers['translation'][0]
-                                   )
-                            )
-                        count += 1
+                # If MT/RE, respond accordingly - count is used as the reference number
+                if any(feature["name"].startswith(prefix) for prefix in prefixes):
+                    contigs[contig_id].mts[count] = (
+                        Methyl(
+                           seq=seq,
+                           start=feature["start"],
+                           end=feature["end"],
+                           score=feature["score"],
+                           domain=feature["name"],
+                           enzyme=enz_type,
+                           ref=count,
+                           locus=cds_id,
+                           translation=feature["translation"]
+                           )
+                    )
+                else:
+                    contigs[contig_id].res[count] = (
+                        RE(
+                           seq=seq,
+                           start=feature["start"],
+                           end=feature["end"],
+                           score=feature["score"],
+                           domain=feature["name"],
+                           enzyme=enz_type,
+                           ref=count,
+                           locus=cds_id,
+                           translation=feature["translation"]
+                           )
+                    )
+                count += 1
 
     # Save the contigs dictionary as a pickle object
     with open(f'{args.o}.pkl', 'wb') as f:
         pickle.dump(contigs, f)
+# if args.i.endswith('.gb'):
+#     # Populating contigs from input file
+#     print("Reading Input File")
+#     records = parse_seqfiles([args.i])
+#
+#     print("Populating Contigs")
+#     for i, rec in enumerate(records):  # Each rec is a contig
+#         print(f"Reading Contig {i}", end='\r')
+#         count = 0
+#         cds_features = DomainatorCDS.list_from_contig(rec)
+#
+#         for feature in cds_features:
+#             if len(feature.domain_features) == 0:
+#                 continue
+#
+#             domain_features = feature.domain_features[0]
+#
+#             contig_id = rec.id
+#             if contig_id not in contigs:
+#                 contigs[contig_id] = (
+#                     Contig(
+#                         ref=contig_id,
+#                         length=len(rec.seq),
+#                         topology=rec.annotations['topology'],
+#                         strain=rec.annotations['organism']
+#                     )
+#                 )
+#
+#             desc = domain_features.qualifiers['description'][0]
+#             score = domain_features.qualifiers['score'][0]
+#
+#             if args.min_score is None or score >= args.min_score: # Filter by score
+#                 # Filtering out to only consider applicable enzymes
+#                 if args.stats and "enzyme/methyltransferase" in desc:
+#                     contigs[contig_id].fusions += 1
+#                 elif all(keyword not in desc for keyword in ["control protein", "homing endonuclease", "subunit", "helicase", "nicking endonuclease", "orphan", "methyl-directed", "enzyme/methyltransferase"]) and "RecSeq:" in desc:
+#                     # Extracting the RecSeq
+#                     recseq_start = desc.find("RecSeq:") + len("RecSeq:")
+#                     recseq_end = desc.find(";", recseq_start)
+#                     seq = desc[recseq_start:recseq_end].split(", ")
+#                     for s in seq:
+#                         if "-" in s:
+#                             seq.remove(s)
+#                             continue
+#                         if args.filter_n:
+#                             if "NNN" in s:
+#                                 seq.remove(s)
+#                                 continue
+#                         if args.ignore_nonspec:
+#                             if len(s) < 3:
+#                                 seq.remove(s)
+#
+#                     # Extracting the EnzType
+#                     if "EnzType:" in desc and len(seq) > 0:
+#                         enz_start = desc.find("EnzType:") + len("EnzType:")
+#                         enz_end = desc.find(";", enz_start)
+#                         enz_type = desc[enz_start:enz_end]
+#
+#                         # If MT/RE, respond accordingly - count is used as the reference number
+#                         name = domain_features.qualifiers['name'][0]
+#                         if any(name.startswith(prefix) for prefix in prefixes):
+#                             contigs[contig_id].mts[count] = (
+#                                 Methyl(
+#                                    seq=seq,
+#                                    start=domain_features.location.start,
+#                                    end=domain_features.location.end,
+#                                    score=score,
+#                                    domain=name,
+#                                    enzyme=enz_type,
+#                                    ref=count,
+#                                    locus=domain_features.qualifiers['cds_id'][0],
+#                                    translation=feature.feature.qualifiers['translation'][0]
+#                                    )
+#                             )
+#                         else:
+#                             contigs[contig_id].res[count] = (
+#                                 RE(
+#                                    seq=seq,
+#                                    start=domain_features.location.start,
+#                                    end=domain_features.location.end,
+#                                    score=score,
+#                                    domain=name,
+#                                    enzyme=enz_type,
+#                                    ref=count,
+#                                    locus=domain_features.qualifiers['cds_id'][0],
+#                                    translation=feature.feature.qualifiers['translation'][0]
+#                                    )
+#                             )
+#                         count += 1
+#
+#     # Save the contigs dictionary as a pickle object
+#     with open(f'{args.o}.pkl', 'wb') as f:
+#         pickle.dump(contigs, f)
 elif args.i.endswith(".pkl"):
     with open(f'{args.i}', 'rb') as f:
         contigs = pickle.load(f)

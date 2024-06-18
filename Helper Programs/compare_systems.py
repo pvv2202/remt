@@ -12,6 +12,7 @@ args = parser.parse_args()
 # TODO: ADD ABILITY TO FEED IN GENERATED MATRICES
 # TODO: MAKE EVERYTHING GO INTO A FOLDER
 # TODO: PROBABLY MAKE A UTILS FILE TO START CLEANING SOME OF THIS UP
+# TODO: FILTER SO THAT IT DOESNT TAKE AS LONG
 
 class Contig:
     def __init__(self, ref, length, topology, strain):
@@ -155,6 +156,11 @@ if args.i.endswith('.gb'):
 elif args.i.endswith(".pkl"):
     with open(f'{args.i}', 'rb') as f:
         contigs = pickle.load(f)
+        for contig in contigs.values():
+            for r in contig.res.values():
+                re_sequences += f">{r.locus}\n{r.translation}\n"
+            for m in contig.mts.values():
+                mt_sequences += f">{m.locus}\n{m.translation}\n"
 else:
     print('Error: Unsupported file format. Please provide a .gb or .pkl file.')
     exit(1)
