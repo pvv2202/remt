@@ -1,6 +1,6 @@
 import argparse
 import pickle
-import shutil
+import os
 from domainator.seq_dist import seq_dist
 from domainator.data_matrix import DataMatrix
 from utils import Annotations, distance
@@ -11,8 +11,6 @@ parser.add_argument('--min_score', default=None, required=False, type=int, help=
 parser.add_argument('--ignore_nonspec', default=None, required=False, action='store_true', help='Filter to ignore MTs with rec seq < 3 bp (nonspecific)')
 parser.add_argument('-o', type=str, default="def", required=False, help='File output name (HTML)')
 args = parser.parse_args()
-
-# TODO: PLACE EVERYTHING INTO A FOLDER
 
 contigs = {}
 re_sequences=""
@@ -39,15 +37,16 @@ for i, contig in enumerate(contigs.values()):
     for m in contig.mts.values():
         mt_sequences += f">{m.locus}\n{m.translation}\n"
 
+os.makedirs(args.o, exist_ok=True)
 # Write fasta files, generate matrices, load matrices
-with open(f"{args.o}_re_sequences.fasta", "w") as f:
+with open(f"{args.o}/{args.o}_re_sequences.fasta", "w") as f:
     f.write(re_sequences)
-with open(f"{args.o}_mt_sequences.fasta", "w") as f:
+with open(f"{args.o}/{args.o}_mt_sequences.fasta", "w") as f:
     f.write(mt_sequences)
-seq_dist(f"{args.o}_re_sequences.fasta", "fasta", f"{args.o}_re_sequences.fasta", "fasta", None, "diamond_us", "score", 8, None, None, f"{args.o}_re_simlarity_matrix.hdf5", 0)
-seq_dist(f"{args.o}_mt_sequences.fasta", "fasta", f"{args.o}_mt_sequences.fasta", "fasta", None, "diamond_us", "score", 8, None, None, f"{args.o}_mt_simlarity_matrix.hdf5", 0)
-re_matrix = DataMatrix.from_file(f"{args.o}_re_simlarity_matrix.hdf5")
-mt_matrix = DataMatrix.from_file(f"{args.o}_mt_simlarity_matrix.hdf5")
+seq_dist(f"{args.o}/{args.o}_re_sequences.fasta", "fasta", f"{args.o}/{args.o}_re_sequences.fasta", "fasta", None, "diamond_us", "score", 8, None, None, f"{args.o}/{args.o}_re_simlarity_matrix.hdf5", 0)
+seq_dist(f"{args.o}/{args.o}_mt_sequences.fasta", "fasta", f"{args.o}/{args.o}_mt_sequences.fasta", "fasta", None, "diamond_us", "score", 8, None, None, f"{args.o}/{args.o}_mt_simlarity_matrix.hdf5", 0)
+re_matrix = DataMatrix.from_file(f"{args.o}/{args.o}_re_simlarity_matrix.hdf5")
+mt_matrix = DataMatrix.from_file(f"{args.o}/{args.o}_mt_simlarity_matrix.hdf5")
 
 all_re = {r.locus: (c.ref, r) for c in contigs.values() for r in c.res.values()}
 hits = {}
@@ -123,7 +122,7 @@ if hits:
     output_filename = args.o + ".html"
 
     # Write the HTML table to the file
-    with open(output_filename, 'w') as file:
+    with open(f"{args.o}/{output_filename}", 'w') as file:
         file.write(html_table)
 
     html_script = """
@@ -164,5 +163,5 @@ if hits:
     </script>
     """
     # Append the JavaScript code to the HTML file
-    with open(output_filename, "a") as file:
+    with open(f"{args.o}/{output_filename}", "a") as file:
         file.write(html_script)
