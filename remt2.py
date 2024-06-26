@@ -1,377 +1,32 @@
 import argparse
-import numpy as np
 import pickle
 import matplotlib.pyplot as plt
 import seaborn as sns
-import gb_io
-from domainator.utils import parse_seqfiles, DomainatorCDS
-from numba import jit
+from utils import Annotations, SmithWaterman, distance, calculate_similarity
 
 parser = argparse.ArgumentParser(description='Generate HTML table from annotated GenBank file.')
 parser.add_argument('-i', type=str, default=None, required=True, help='Annotated genbank or pickle file input')
 parser.add_argument('-o', type=str, default="def", required=False, help='File output name (HTML)')
-parser.add_argument('--coords', default=True, required=False, action='store_true', help='Include coords')
-parser.add_argument('--translation', default=True, required=False, action='store_true', help='Include protein sequence')
-parser.add_argument('--stats', default=None, required=False, action='store_true', help='Print stats to terminal')
+parser.add_argument('--stats', default=None, required=False, action='store_true', help='Print stats to console')
 parser.add_argument('--histogram', nargs='?', default=None, const=10, type=int, help='Output histogram of system distances. Specify bin size after. Default is 10')
 parser.add_argument('--kde', default=None, required=False, action='store_true', help='Output kde of system distances (clipped to display positive values only)')
 parser.add_argument('--excel', default=None, required=False, action='store_true', help='Make results excel friendly (default is HTML friendly)')
-parser.add_argument('--filter_n', default=None, required=False, action='store_true', help='Remove hits with a lot of Ns')
-parser.add_argument('--ignore_nonspec', default=None, required=False, action='store_true', help='Filter to ignore MTs with rec seq < 3 bp (nonspecific)')
+parser.add_argument('--ignore_nonspec', default=None, required=False, action='store_true', help='Filter to ignore MTs with rec seq < 3 bp or many Ns in rec seq (nonspecific)')
 parser.add_argument('--min_distance', default=None, required=False, type=int, help='Filter by distance')
 parser.add_argument('--min_score', default=None, required=False, type=int, help='Filter by score (for enzymes, not for final weighted score)')
 parser.add_argument('--in_range', default=5000, required=False, type=int, help='Include a metric of how many mts/res are in range of each hit')
 args = parser.parse_args()
 
-class Contig:
-    def __init__(self, ref, length, topology, strain):
-        self.ref = ref
-        self.length = length
-        self.topology = topology
-        self.strain = strain
-        self.fusions = 0
-        self.mts = {}
-        self.res = {}
-        self.hits = {}
-
-class Enzyme:
-    def __init__(self, seq, start, end, score, domain, enzyme, ref, locus, translation):
-        # Reference number for faster lookup
-        self.seq = seq
-        self.start = int(start)
-        self.end = int(end)
-        self.score = float(score)
-        self.domain = domain
-        self.enzyme = enzyme
-        self.ref = ref
-        self.locus = locus
-        self.translation = translation
-        self.range = list()
-        self.matches = list()
-
-class Methyl(Enzyme):
-    pass
-
-class RE(Enzyme):
-    pass
-
-#Storing prefixes, iupac, primes
-prefixes = {"M.", "M1.", "M2.", "M3.", "M4."}
-
-# Define IUPAC codes
-iupac = {
-    'A': 'A',
-    'C': 'C',
-    'G': 'G',
-    'T': 'T',
-    'R': 'AG',
-    'Y': 'CT',
-    'S': 'GC',
-    'W': 'AT',
-    'K': 'GT',
-    'M': 'AC',
-    'B': 'CGT',
-    'D': 'AGT',
-    'H': 'ACT',
-    'V': 'ACG',
-    'N': 'ACGT'
-}
-
-# Preprocess the IUPAC codes into a lookup table. 90 x 90 b/c ord(Y) is 89. Using ord makes indexing easier
-iupac_lookup = np.zeros((90, 90), dtype=np.bool_)
-
-for key, value in iupac.items():
-    for char in value:
-        iupac_lookup[ord(key), ord(char)] = True
-
-def calculate_similarity(string1, string2):
-    set1 = set(string1)
-    set2 = set(string2)
-
-    intersection = set1.intersection(set2)
-    union = set1.union(set2)
-
-    return len(intersection) / len(union)
-
-@jit(nopython=True)
-def distance(A_start, A_end, B_start, B_end, topology, contig_length):
-    circular_distance = 0
-
-    if topology == "circular":
-        circular_distance = contig_length - (max(A_end, B_end) - min(A_start, B_start)) # Total length - distance between start and end
-
-    return min(max(0, B_start - A_end, A_start - B_end), circular_distance) # Return max b/c one of the start/end differences will always be negative. Then if circ dist is less return that
-
-@jit(nopython=True)
-def iupac_match_numba(char1, char2, iupac_lookup):
-    return iupac_lookup[ord(char1), ord(char2)] # Just look up from table
-
-@jit(nopython=True)
-def smith_waterman(sequence1, sequence2, exact_match_score, match_score, mismatch_score, gap_penalty, iupac_lookup):
-    # Initialize the score matrix and traceback matrix
-    rows = len(sequence1) + 1
-    cols = len(sequence2) + 1
-    score_matrix = np.zeros((rows, cols))
-    traceback_matrix = np.zeros((rows, cols), dtype=np.int32)
-
-    # Fill the score and traceback matrices
-    for i in range(1, rows):
-        for j in range(1, cols):
-            if sequence1[i - 1] == sequence2[j - 1]: # If the characters are the same
-                to_add = exact_match_score
-            elif iupac_match_numba(sequence1[i - 1], sequence2[j - 1], iupac_lookup): # If they are an iupac match
-                to_add = match_score
-            else: # If they mismatch
-                to_add = mismatch_score
-            match = score_matrix[i - 1, j - 1] + to_add # Match, so move up in both sequences
-            delete = score_matrix[i - 1, j] + gap_penalty # Move up one in sequence 2
-            insert = score_matrix[i, j - 1] + gap_penalty # Move up one in sequence 1
-            score_matrix[i, j] = max(0, match, delete, insert)
-
-            if score_matrix[i, j] == match:
-                traceback_matrix[i, j] = 1  # Diagonal
-            elif score_matrix[i, j] == delete:
-                traceback_matrix[i, j] = 2  # Up
-            elif score_matrix[i, j] == insert:
-                traceback_matrix[i, j] = 3  # Left
-
-    # Find the cell with the maximum score in the score matrix
-    max_score = np.max(score_matrix)
-    max_i, max_j = 0, 0
-    for i in range(rows):
-        for j in range(cols):
-            if score_matrix[i, j] == max_score:
-                max_i, max_j = i, j
-                break
-
-    # Traceback to find the alignment
-    aligned_seq1 = []
-    aligned_seq2 = []
-    i, j = max_i, max_j
-
-    while i > 0 and j > 0 and score_matrix[i, j] > 0:
-        if traceback_matrix[i, j] == 1:  # Diagonal
-            aligned_seq1.append(sequence1[i - 1])
-            aligned_seq2.append(sequence2[j - 1])
-            i -= 1
-            j -= 1
-        elif traceback_matrix[i, j] == 2:  # Up, gap in sequence 2
-            aligned_seq1.append(sequence1[i - 1])
-            aligned_seq2.append('-')
-            i -= 1
-        elif traceback_matrix[i, j] == 3:  # Left, gap in sequence 1
-            aligned_seq1.append('-')
-            aligned_seq2.append(sequence2[j - 1])
-            j -= 1
-
-    aligned_seq1.reverse()
-    aligned_seq2.reverse()
-
-    return ''.join(aligned_seq1), ''.join(aligned_seq2), max_score
-
-def smith_waterman_with_iupac(sequence1, sequence2, exact_match_score=3, match_score=1, mismatch_score=-1, gap_penalty=-2):
-    aligned_seq1, aligned_seq2, max_score = smith_waterman(sequence1, sequence2, exact_match_score, match_score, mismatch_score, gap_penalty, iupac_lookup)
-    return aligned_seq1, aligned_seq2, max_score
-
 contigs = {}
+sw = SmithWaterman()
 
-def extract_domainator_cds(record):
-    cdss = {}
-    for feature in record.features:
-        qualifiers = {q.key: q.value for q in feature.qualifiers}
-        if "cds_id" not in qualifiers:
-            continue
-        if qualifiers["cds_id"] not in cdss:
-            cdss[qualifiers["cds_id"]] = {}
-        dict = cdss[qualifiers["cds_id"]]
-        if feature.kind == "CDS":
-            dict["translation"] = qualifiers["translation"]
-        elif feature.kind == "Domainator":
-            dict["start"] = feature.location.start
-            dict["end"] = feature.location.end
-            dict["desc"] = qualifiers["description"]
-            dict["name"] = qualifiers["name"]
-            dict["score"] = qualifiers["score"]
-
-    temp = cdss.copy()
-    for id, cds in cdss.items():
-        if len(cds.keys()) < 2:
-            del temp[id]
-    return temp
-
-print("Populating Contigs")
-if args.i.endswith('.gb'):
-    for i, record in enumerate(gb_io.iter(args.i)):
-        print(f"Reading Contig {i}", end='\r')
-        count = 0
-        cds_features = extract_domainator_cds(record)
-        for cds_id, feature in cds_features.items():
-            contig_id = record.name
-            desc = feature["desc"].split(";")
-            if contig_id not in contigs:
-                strain = desc[3][9:]
-                contigs[contig_id] = (
-                    Contig(
-                        ref=contig_id,
-                        length=record.length,
-                        topology= "circular" if record.circular else "linear",
-                        strain=strain
-                    )
-                )
-
-            if args.min_score and feature["score"] < args.min_score:
-                continue
-
-            enz_type = desc[0][7:]
-
-            if args.stats and "enzyme/methyltransferase" in enz_type:
-                contigs[contig_id].fusions += 1
-            elif all(keyword not in enz_type for keyword in ["control protein", "homing endonuclease", "subunit", "helicase", "nicking endonuclease", "orphan", "methyl-directed", "enzyme/methyltransferase"]) and "RecSeq:" in desc:
-                # Extracting the RecSeq
-                seq = desc[1][7:].split(", ")
-                for s in seq:
-                    if "-" in s:
-                        seq.remove(s)
-                        continue
-                    if args.filter_n:
-                        if "NNN" in s:
-                            seq.remove(s)
-                            continue
-                    if args.ignore_nonspec:
-                        if len(s) < 3:
-                            seq.remove(s)
-
-                # Extracting the EnzType
-                if len(seq) == 0:
-                    continue
-
-                # If MT/RE, respond accordingly - count is used as the reference number
-                if any(feature["name"].startswith(prefix) for prefix in prefixes):
-                    contigs[contig_id].mts[count] = (
-                        Methyl(
-                           seq=seq,
-                           start=feature["start"],
-                           end=feature["end"],
-                           score=feature["score"],
-                           domain=feature["name"],
-                           enzyme=enz_type,
-                           ref=count,
-                           locus=cds_id,
-                           translation=feature["translation"]
-                           )
-                    )
-                else:
-                    contigs[contig_id].res[count] = (
-                        RE(
-                           seq=seq,
-                           start=feature["start"],
-                           end=feature["end"],
-                           score=feature["score"],
-                           domain=feature["name"],
-                           enzyme=enz_type,
-                           ref=count,
-                           locus=cds_id,
-                           translation=feature["translation"]
-                           )
-                    )
-                count += 1
+if args.i.endswith(".gb"):
+    Annotations = Annotations(args)
+    contigs = Annotations.parse()
 
     # Save the contigs dictionary as a pickle object
     with open(f'{args.o}.pkl', 'wb') as f:
         pickle.dump(contigs, f)
-# if args.i.endswith('.gb'):
-#     # Populating contigs from input file
-#     print("Reading Input File")
-#     records = parse_seqfiles([args.i])
-#
-#     print("Populating Contigs")
-#     for i, rec in enumerate(records):  # Each rec is a contig
-#         print(f"Reading Contig {i}", end='\r')
-#         count = 0
-#         cds_features = DomainatorCDS.list_from_contig(rec)
-#
-#         for feature in cds_features:
-#             if len(feature.domain_features) == 0:
-#                 continue
-#
-#             domain_features = feature.domain_features[0]
-#
-#             contig_id = rec.id
-#             if contig_id not in contigs:
-#                 contigs[contig_id] = (
-#                     Contig(
-#                         ref=contig_id,
-#                         length=len(rec.seq),
-#                         topology=rec.annotations['topology'],
-#                         strain=rec.annotations['organism']
-#                     )
-#                 )
-#
-#             desc = domain_features.qualifiers['description'][0]
-#             score = domain_features.qualifiers['score'][0]
-#
-#             if args.min_score is None or score >= args.min_score: # Filter by score
-#                 # Filtering out to only consider applicable enzymes
-#                 if args.stats and "enzyme/methyltransferase" in desc:
-#                     contigs[contig_id].fusions += 1
-#                 elif all(keyword not in desc for keyword in ["control protein", "homing endonuclease", "subunit", "helicase", "nicking endonuclease", "orphan", "methyl-directed", "enzyme/methyltransferase"]) and "RecSeq:" in desc:
-#                     # Extracting the RecSeq
-#                     recseq_start = desc.find("RecSeq:") + len("RecSeq:")
-#                     recseq_end = desc.find(";", recseq_start)
-#                     seq = desc[recseq_start:recseq_end].split(", ")
-#                     for s in seq:
-#                         if "-" in s:
-#                             seq.remove(s)
-#                             continue
-#                         if args.filter_n:
-#                             if "NNN" in s:
-#                                 seq.remove(s)
-#                                 continue
-#                         if args.ignore_nonspec:
-#                             if len(s) < 3:
-#                                 seq.remove(s)
-#
-#                     # Extracting the EnzType
-#                     if "EnzType:" in desc and len(seq) > 0:
-#                         enz_start = desc.find("EnzType:") + len("EnzType:")
-#                         enz_end = desc.find(";", enz_start)
-#                         enz_type = desc[enz_start:enz_end]
-#
-#                         # If MT/RE, respond accordingly - count is used as the reference number
-#                         name = domain_features.qualifiers['name'][0]
-#                         if any(name.startswith(prefix) for prefix in prefixes):
-#                             contigs[contig_id].mts[count] = (
-#                                 Methyl(
-#                                    seq=seq,
-#                                    start=domain_features.location.start,
-#                                    end=domain_features.location.end,
-#                                    score=score,
-#                                    domain=name,
-#                                    enzyme=enz_type,
-#                                    ref=count,
-#                                    locus=domain_features.qualifiers['cds_id'][0],
-#                                    translation=feature.feature.qualifiers['translation'][0]
-#                                    )
-#                             )
-#                         else:
-#                             contigs[contig_id].res[count] = (
-#                                 RE(
-#                                    seq=seq,
-#                                    start=domain_features.location.start,
-#                                    end=domain_features.location.end,
-#                                    score=score,
-#                                    domain=name,
-#                                    enzyme=enz_type,
-#                                    ref=count,
-#                                    locus=domain_features.qualifiers['cds_id'][0],
-#                                    translation=feature.feature.qualifiers['translation'][0]
-#                                    )
-#                             )
-#                         count += 1
-#
-#     # Save the contigs dictionary as a pickle object
-#     with open(f'{args.o}.pkl', 'wb') as f:
-#         pickle.dump(contigs, f)
 elif args.i.endswith(".pkl"):
     with open(f'{args.i}', 'rb') as f:
         contigs = pickle.load(f)
@@ -396,53 +51,52 @@ for i, c in enumerate(contigs.values()):
 
                     # If mseq <= rseq (if greater cannot block every site), run smith-waterman
                     if len(mseq) <= len(rseq):
-                        aligned_mseq, aligned_rseq, score = smith_waterman_with_iupac(mseq, rseq)
+                        # Filter any weird matches to nonsepc regions
+                        if ("NNN" in rseq and "NNN" not in mseq) or ("NNN" in mseq and "NNN" not in rseq):
+                            continue
+                        aligned_mseq, aligned_rseq, score = sw.smith_waterman(mseq, rseq)
                         #Filtering by score, length of rseq, absolute value of mseq
                         if score > 2 and len(aligned_rseq) > 3 and (len(aligned_mseq) == len(mseq)):
                             sim = calculate_similarity(mseq, rseq)
                             asim = calculate_similarity(aligned_mseq, aligned_rseq)
-                            if (mseq != rseq and "NNN" not in mseq and "NNN" not in rseq) or mseq == rseq:
-                                #Doing a better job getting the score
-                                weighted_score = round((asim + sim) * score) + round(1000/dist) if dist > 0 else 1000
 
-                                if asim == 1 and r.score > 80 and m.score > 80:
-                                    if r.ref not in c.hits or weighted_score > c.hits[r.ref]["Score"]:
-                                        temp = {
-                                            "Contig": c.ref,
-                                            "Strain": c.strain,
-                                            "Types": [m.enzyme, r.enzyme],
-                                            "Domains": [m.domain, r.domain],
-                                            "Sequences": [mseq, rseq],
-                                            "Alignment": [aligned_mseq, aligned_rseq],
-                                            "Loci": [m.locus, r.locus],
-                                            "Score": weighted_score,
-                                            "Scores": [m.score, r.score],
-                                            "Distance": dist,
-                                        }
+                            #Doing a better job getting the score
+                            weighted_score = round((asim + sim) * score) + round(1000/dist) if dist > 0 else 1000
 
-                                        if args.in_range:
-                                            if len(r.range) == 0:
-                                                r.range.append("None")
-                                            if len(m.range) == 0:
-                                                m.range.append("None")
-                                            for mt_in_range in r.range:
-                                                temp["MT within " + str(args.in_range) + " bp"] = mt_in_range
-                                            for rt_in_range in m.range:
-                                                temp["RE within " + str(args.in_range) + " bp"] = rt_in_range
+                            if asim == 1 and r.score > 80 and m.score > 80:
+                                if r.ref not in c.hits or weighted_score > c.hits[r.ref]["Score"]:
+                                    temp = {
+                                        "Contig": c.ref,
+                                        "Strain": c.strain,
+                                        "Types": [m.enzyme, r.enzyme],
+                                        "Domains": [m.domain, r.domain],
+                                        "Sequences": [mseq, rseq],
+                                        "Alignment": [aligned_mseq, aligned_rseq],
+                                        "Loci": [m.locus, r.locus],
+                                        "Score": weighted_score,
+                                        "Scores": [m.score, r.score],
+                                        "Distance": dist,
+                                        "Coords": [str(m.start) + ", " + str(m.end), str(r.start) + ", " + str(r.end)],
+                                        "Translation": [m.translation, r.translation]
+                                    }
 
-                                        if args.coords:
-                                            temp["Coords"] = [str(m.start) + ", " + str(m.end), str(r.start) + ", " + str(r.end)]
+                                    if args.in_range:
+                                        if len(r.range) == 0:
+                                            r.range.append("None")
+                                        if len(m.range) == 0:
+                                            m.range.append("None")
+                                        for mt_in_range in r.range:
+                                            temp["MT within " + str(args.in_range) + " bp"] = mt_in_range
+                                        for rt_in_range in m.range:
+                                            temp["RE within " + str(args.in_range) + " bp"] = rt_in_range
 
-                                        if args.translation:
-                                            temp["Translation"] = [m.translation, r.translation]
-
-                                        c.hits[r.ref] = temp
+                                    c.hits[r.ref] = temp
 
 print("\r    ")
 
 hits = {}
-for c in contigs:
-    hits.update(contigs[c].hits)
+for contig in contigs.values():
+    hits.update(contig.hits)
 
 #Filtering hits for distance
 if args.min_distance is not None:

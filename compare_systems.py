@@ -1,169 +1,43 @@
 import argparse
 import pickle
+import shutil
 from domainator.seq_dist import seq_dist
 from domainator.data_matrix import DataMatrix
-from domainator.utils import parse_seqfiles, DomainatorCDS
+from utils import Annotations, distance
 
 parser = argparse.ArgumentParser(description='Generate HTML table from annotated GenBank file.')
 parser.add_argument('-i', type=str, default=None, required=True, help='Annotated genbank or pickle file input')
+parser.add_argument('--min_score', default=None, required=False, type=int, help='Filter by score (for enzymes, not for final weighted score)')
+parser.add_argument('--ignore_nonspec', default=None, required=False, action='store_true', help='Filter to ignore MTs with rec seq < 3 bp (nonspecific)')
 parser.add_argument('-o', type=str, default="def", required=False, help='File output name (HTML)')
 args = parser.parse_args()
 
-# TODO: ADD ABILITY TO FEED IN GENERATED MATRICES
-# TODO: MAKE EVERYTHING GO INTO A FOLDER
-# TODO: PROBABLY MAKE A UTILS FILE TO START CLEANING SOME OF THIS UP
-# TODO: FILTER SO THAT IT DOESNT TAKE AS LONG
-
-class Contig:
-    def __init__(self, ref, length, topology, strain):
-        self.ref = ref
-        self.length = length
-        self.topology = topology
-        self.strain = strain
-        self.fusions = 0
-        self.mts = {}
-        self.res = {}
-        self.hits = {}
-
-class Enzyme:
-    def __init__(self, seq, start, end, score, domain, enzyme, ref, locus, translation):
-        # Reference number for faster lookup
-        self.seq = seq
-        self.start = int(start)
-        self.end = int(end)
-        self.score = float(score)
-        self.domain = domain
-        self.enzyme = enzyme
-        self.ref = ref
-        self.locus = locus
-        self.translation = translation
-        self.range = list()
-        self.matches = list()
-
-class Methyl(Enzyme):
-    pass
-
-class RE(Enzyme):
-    pass
-
-def distance(A_start, A_end, B_start, B_end, topology, contig_length):
-    circular_distance = 0
-
-    if topology == "circular":
-        circular_distance = contig_length - (max(A_end, B_end) - min(A_start, B_start)) # Total length - distance between start and end
-
-    return min(max(0, B_start - A_end, A_start - B_end), circular_distance) # Return max b/c one of the start/end differences will always be negative. Then if circ dist is less return that
-
-prefixes = {"M.", "M1.", "M2.", "M3.", "M4."}
+# TODO: PLACE EVERYTHING INTO A FOLDER
 
 contigs = {}
 re_sequences=""
 mt_sequences=""
 
-# Processing input file
 if args.i.endswith('.gb'):
-    # Populating contigs from input file
-    print("Reading Input File")
-    records = parse_seqfiles([args.i])
-
-    print("Populating Contigs")
-    for i, rec in enumerate(records):  # Each rec is a contig
-        print(f"Reading Contig {i}", end='\r')
-        count = 0
-        cds_features = DomainatorCDS.list_from_contig(rec)
-
-        for feature in cds_features:
-            if len(feature.domain_features) == 0:
-                continue
-
-            domain_features = feature.domain_features[0]
-
-            contig_id = rec.id
-            if contig_id not in contigs:
-                contigs[contig_id] = (
-                    Contig(
-                        ref=contig_id,
-                        length=len(rec.seq),
-                        topology=rec.annotations['topology'],
-                        strain=rec.annotations['organism']
-                    )
-                )
-
-            desc = domain_features.qualifiers['description'][0]
-            score = domain_features.qualifiers['score'][0]
-
-            # Filtering out to only consider applicable enzymes
-            if "enzyme/methyltransferase" in desc:
-                contigs[contig_id].fusions += 1
-            elif all(keyword not in desc for keyword in ["control protein", "homing endonuclease", "subunit", "helicase", "nicking endonuclease", "orphan", "methyl-directed", "enzyme/methyltransferase"]) and "RecSeq:" in desc:
-                # Extracting the RecSeq
-                recseq_start = desc.find("RecSeq:") + len("RecSeq:")
-                recseq_end = desc.find(";", recseq_start)
-                seq = desc[recseq_start:recseq_end].split(", ")
-                for s in seq:
-                    if "-" in s:
-                        seq.remove(s)
-                        continue
-                    if "NNN" in s:
-                        seq.remove(s)
-
-                if len(seq) == 0 or (len(seq) == 1 and "NNN" in seq[0]):
-                    continue
-
-                # Extracting the EnzType
-                if "EnzType:" in desc and len(seq) > 0:
-                    enz_start = desc.find("EnzType:") + len("EnzType:")
-                    enz_end = desc.find(";", enz_start)
-                    enz_type = desc[enz_start:enz_end]
-
-                    # If MT/RE, respond accordingly - count is used as the reference number
-                    name = domain_features.qualifiers['name'][0]
-                    if any(name.startswith(prefix) for prefix in prefixes):
-                        contigs[contig_id].mts[count] = (
-                            Methyl(
-                               seq=seq,
-                               start=domain_features.location.start,
-                               end=domain_features.location.end,
-                               score=score,
-                               domain=name,
-                               enzyme=enz_type,
-                               ref=count,
-                               locus=domain_features.qualifiers['cds_id'][0],
-                               translation=feature.feature.qualifiers['translation'][0]
-                               )
-                        )
-                        mt_sequences += f">{domain_features.qualifiers['cds_id'][0]}\n{feature.feature.qualifiers['translation'][0]}\n"
-                    else:
-                        contigs[contig_id].res[count] = (
-                            RE(
-                               seq=seq,
-                               start=domain_features.location.start,
-                               end=domain_features.location.end,
-                               score=score,
-                               domain=name,
-                               enzyme=enz_type,
-                               ref=count,
-                               locus=domain_features.qualifiers['cds_id'][0],
-                               translation=feature.feature.qualifiers['translation'][0]
-                               )
-                        )
-                        re_sequences += f">{domain_features.qualifiers['cds_id'][0]}\n{feature.feature.qualifiers['translation'][0]}\n"
-                    count += 1
+    Annotations = Annotations(args)
+    contigs = Annotations.parse()
 
     # Save the contigs dictionary as a pickle object
     with open(f'{args.o}.pkl', 'wb') as f:
         pickle.dump(contigs, f)
-elif args.i.endswith(".pkl"):
-    with open(f'{args.i}', 'rb') as f:
+elif args.i[0].endswith(".pkl"):
+    with open(f'{args.i[0]}', 'rb') as f:
         contigs = pickle.load(f)
-        for contig in contigs.values():
-            for r in contig.res.values():
-                re_sequences += f">{r.locus}\n{r.translation}\n"
-            for m in contig.mts.values():
-                mt_sequences += f">{m.locus}\n{m.translation}\n"
 else:
     print('Error: Unsupported file format. Please provide a .gb or .pkl file.')
     exit(1)
+
+for i, contig in enumerate(contigs.values()):
+    print(f'{int(i / len(contigs) * 100)}%', end='\r')
+    for r in contig.res.values():
+        re_sequences += f">{r.locus}\n{r.translation}\n"
+    for m in contig.mts.values():
+        mt_sequences += f">{m.locus}\n{m.translation}\n"
 
 # Write fasta files, generate matrices, load matrices
 with open(f"{args.o}_re_sequences.fasta", "w") as f:
