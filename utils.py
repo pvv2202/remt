@@ -78,7 +78,7 @@ class Annotations:
                     strain=strain
                 )
 
-            if self.args.min_score and feature["score"] < self.args.min_score:
+            if self.args.min_score and int(feature["score"]) < self.args.min_score:
                 continue
 
             enz_type = desc[0][7:]
