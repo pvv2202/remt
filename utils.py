@@ -52,7 +52,7 @@ class Annotations:
             if feature.kind == "CDS":
                 dict["translation"] = qualifiers["translation"]
             elif feature.kind == "Domainator":
-                if not hasattr(feature, "location"):
+                if not hasattr(feature.location, "start") or not hasattr(feature.location, "end") or not qualifiers.get("description") or not qualifiers.get("name") or not qualifiers.get("score"):
                     continue
                 dict["start"] = feature.location.start
                 dict["end"] = feature.location.end
