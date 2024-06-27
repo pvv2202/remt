@@ -52,6 +52,8 @@ class Annotations:
             if feature.kind == "CDS":
                 dict["translation"] = qualifiers["translation"]
             elif feature.kind == "Domainator":
+                if not hasattr(feature, "location"):
+                    continue
                 dict["start"] = feature.location.start
                 dict["end"] = feature.location.end
                 dict["desc"] = qualifiers["description"]
