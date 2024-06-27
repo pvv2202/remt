@@ -7,6 +7,7 @@ from utils import Annotations, distance
 
 parser = argparse.ArgumentParser(description='Generate HTML table from annotated GenBank file.')
 parser.add_argument('-i', type=str, default=None, required=True, help='Annotated genbank or pickle file input')
+parser.add_argument('--mats', nargs='+', type=str, default=None, required=False, help='Similarity matrices. RE goes first')
 parser.add_argument('--min_score', default=None, required=False, type=int, help='Filter by score (for enzymes, not for final weighted score)')
 parser.add_argument('--ignore_nonspec', default=None, required=False, action='store_true', help='Filter to ignore MTs with rec seq < 3 bp (nonspecific)')
 parser.add_argument('-o', type=str, default="def", required=False, help='File output name (HTML)')
@@ -23,30 +24,41 @@ if args.i.endswith('.gb'):
     # Save the contigs dictionary as a pickle object
     with open(f'{args.o}.pkl', 'wb') as f:
         pickle.dump(contigs, f)
-elif args.i[0].endswith(".pkl"):
-    with open(f'{args.i[0]}', 'rb') as f:
+elif args.i.endswith(".pkl"):
+    with open(f'{args.i}', 'rb') as f:
         contigs = pickle.load(f)
 else:
     print('Error: Unsupported file format. Please provide a .gb or .pkl file.')
     exit(1)
 
-for i, contig in enumerate(contigs.values()):
-    print(f'{int(i / len(contigs) * 100)}%', end='\r')
-    for r in contig.res.values():
-        re_sequences += f">{r.locus}\n{r.translation}\n"
-    for m in contig.mts.values():
-        mt_sequences += f">{m.locus}\n{m.translation}\n"
+if not args.mats: # Only do this if the matrices are not provided
+    for i, contig in enumerate(contigs.values()):
+        print(f'{int(i / len(contigs) * 100)}%', end='\r')
+        for r in contig.res.values():
+            re_sequences += f">{r.locus}\n{r.translation}\n"
+        for m in contig.mts.values():
+            mt_sequences += f">{m.locus}\n{m.translation}\n"
 
-os.makedirs(args.o, exist_ok=True)
-# Write fasta files, generate matrices, load matrices
-with open(f"{args.o}/{args.o}_re_sequences.fasta", "w") as f:
-    f.write(re_sequences)
-with open(f"{args.o}/{args.o}_mt_sequences.fasta", "w") as f:
-    f.write(mt_sequences)
-seq_dist(f"{args.o}/{args.o}_re_sequences.fasta", "fasta", f"{args.o}/{args.o}_re_sequences.fasta", "fasta", None, "diamond_us", "score", 8, None, None, f"{args.o}/{args.o}_re_simlarity_matrix.hdf5", 0)
-seq_dist(f"{args.o}/{args.o}_mt_sequences.fasta", "fasta", f"{args.o}/{args.o}_mt_sequences.fasta", "fasta", None, "diamond_us", "score", 8, None, None, f"{args.o}/{args.o}_mt_simlarity_matrix.hdf5", 0)
-re_matrix = DataMatrix.from_file(f"{args.o}/{args.o}_re_simlarity_matrix.hdf5")
-mt_matrix = DataMatrix.from_file(f"{args.o}/{args.o}_mt_simlarity_matrix.hdf5")
+    os.makedirs(args.o, exist_ok=True)
+    # Write fasta files, generate matrices, load matrices
+    with open(f"{args.o}/{args.o}_re_sequences.fasta", "w") as f:
+        f.write(re_sequences)
+    with open(f"{args.o}/{args.o}_mt_sequences.fasta", "w") as f:
+        f.write(mt_sequences)
+
+    seq_dist(f"{args.o}/{args.o}_re_sequences.fasta", "fasta", f"{args.o}/{args.o}_re_sequences.fasta", "fasta", None, "diamond_us", "score", 8, None, None, f"{args.o}/{args.o}_re_similarity_matrix.hdf5", 0)
+    seq_dist(f"{args.o}/{args.o}_mt_sequences.fasta", "fasta", f"{args.o}/{args.o}_mt_sequences.fasta", "fasta", None, "diamond_us", "score", 8, None, None, f"{args.o}/{args.o}_mt_similarity_matrix.hdf5", 0)
+
+re_mat_path = f"{args.o}/{args.o}_re_similarity_matrix.hdf5"
+mt_mat_path = f"{args.o}/{args.o}_mt_similarity_matrix.hdf5"
+
+if args.mats:
+    # RE first, MT second
+    re_mat_path = args.mats[0]
+    mt_mat_path = args.mats[1]
+
+re_matrix = DataMatrix.from_file(re_mat_path)
+mt_matrix = DataMatrix.from_file(mt_mat_path)
 
 all_re = {r.locus: (c.ref, r) for c in contigs.values() for r in c.res.values()}
 hits = {}
@@ -62,11 +74,15 @@ for i, c in enumerate(contigs.values()):
             if s1_dist > 2500:
                 continue
             for r2_loc in all_re:
+                if r.locus not in re_matrix.rows or r2_loc not in re_matrix.columns:
+                    continue
                 if re_matrix.data[re_matrix.row_to_idx[r.locus], re_matrix.column_to_idx[r2_loc]] < 50:
                     continue
                 r2 = all_re[r2_loc][1]
                 c2 = contigs[all_re[r2_loc][0]]
                 for m2 in c2.mts.values(): # Check mts on the re's contig
+                    if m.locus not in mt_matrix.rows or m2.locus not in mt_matrix.columns:
+                        continue
                     if mt_matrix.data[mt_matrix.row_to_idx[m.locus], mt_matrix.column_to_idx[m2.locus]] < 50:
                         continue
                     s2_dist = distance(min(r2.start, r2.end), max(r2.start, r2.end), min(m2.start, m2.end), max(m2.start, m2.end), c2.topology, c2.length)

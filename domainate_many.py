@@ -1,10 +1,16 @@
 import os
 import subprocess
 import glob
+import argparse
+
+parser = argparse.ArgumentParser(description='Run domainator on gb files')
+parser.add_argument('-dir', type=str, default=None, required=True, help='Root directory')
+parser.add_argument('-ref', type=str, default=None, required=True, help='Reference fasta file')
+args = parser.parse_args()
 
 # Define the root directory where the protein directories are located
-root_dir = "/Users/pvandervort/Downloads/BpeH640ORF18650P"
-reference_fasta = "/Users/pvandervort/Downloads/Gold_Standard_np_prot.fasta"
+root_dir = args.dir
+reference_fasta = args.ref
 
 # Function to annotate a GenBank file
 def annotate_genbank(gb_file, reference_fasta, max_overlap=0.6):
