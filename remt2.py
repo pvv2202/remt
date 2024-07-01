@@ -21,8 +21,8 @@ contigs = {}
 sw = SmithWaterman()
 
 if args.i.endswith(".gb"):
-    Annotations = Annotations(args)
-    contigs = Annotations.parse()
+    annotations = Annotations(args)
+    contigs = annotations.parse()
 
     # Save the contigs dictionary as a pickle object
     with open(f'{args.o}.pkl', 'wb') as f:
@@ -63,44 +63,48 @@ for i, c in enumerate(contigs.values()):
                             #Doing a better job getting the score
                             weighted_score = round((asim + sim) * score) + round(1000/dist) if dist > 0 else 1000
 
-                            if asim == 1 and r.score > 80 and m.score > 80:
-                                if r.ref not in c.hits or weighted_score > c.hits[r.ref]["Score"]:
-                                    temp = {
-                                        "Contig": c.ref,
-                                        "Strain": c.strain,
-                                        "Types": [m.enzyme, r.enzyme],
-                                        "Domains": [m.domain, r.domain],
-                                        "Sequences": [mseq, rseq],
-                                        "Alignment": [aligned_mseq, aligned_rseq],
-                                        "Loci": [m.locus, r.locus],
-                                        "Score": weighted_score,
-                                        "Scores": [m.score, r.score],
-                                        "Distance": dist,
-                                        "Coords": [str(m.start) + ", " + str(m.end), str(r.start) + ", " + str(r.end)],
-                                        "Translation": [m.translation, r.translation]
-                                    }
+                            if r.ref not in c.hits or weighted_score > c.hits[r.ref]["Score"]:
+                                temp = {
+                                    "Contig": c.ref,
+                                    "Strain": c.strain,
+                                    "Types": [m.enzyme, r.enzyme],
+                                    "Domains": [m.domain, r.domain],
+                                    "Sequences": [mseq, rseq],
+                                    "Alignment": [aligned_mseq, aligned_rseq],
+                                    "Loci": [m.locus, r.locus],
+                                    "Score": weighted_score,
+                                    "Scores": [m.score, r.score],
+                                    "Distance": dist,
+                                    "Coords": [str(m.start) + ", " + str(m.end), str(r.start) + ", " + str(r.end)],
+                                    "Translation": [m.translation, r.translation]
+                                }
 
-                                    if args.in_range:
-                                        if len(r.range) == 0:
-                                            r.range.append("None")
-                                        if len(m.range) == 0:
-                                            m.range.append("None")
-                                        for mt_in_range in r.range:
-                                            temp["MT within " + str(args.in_range) + " bp"] = mt_in_range
-                                        for rt_in_range in m.range:
-                                            temp["RE within " + str(args.in_range) + " bp"] = rt_in_range
+                                if args.in_range:
+                                    if len(r.range) == 0:
+                                        r.range.append("None")
+                                    if len(m.range) == 0:
+                                        m.range.append("None")
+                                    for mt_in_range in r.range:
+                                        temp["MT within " + str(args.in_range) + " bp"] = mt_in_range
+                                    for rt_in_range in m.range:
+                                        temp["RE within " + str(args.in_range) + " bp"] = rt_in_range
 
-                                    c.hits[r.ref] = temp
+                                c.hits[r.ref] = temp
 
 print("\r    ")
 
 hits = {}
+count = 0
 for contig in contigs.values():
-    hits.update(contig.hits)
+    for hit in contig.hits.values():
+        hits[count] = hit
+        count += 1
 
 #Filtering hits for distance
 if args.min_distance is not None:
     hits = {h: v for h, v in hits.items() if v["Distance"] >= args.min_distance}
+
+print(len(hits))
 
 #Printing necessary data for stats
 if args.stats:

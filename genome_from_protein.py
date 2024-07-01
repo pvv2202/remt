@@ -7,6 +7,7 @@ import pandas as pd
 import tqdm
 import gzip
 import requests
+import time
 from pyppeteer import launch
 from Bio import SeqIO
 
@@ -116,12 +117,15 @@ for index, row in df.iterrows():
 
                     print(f"Downloaded and converted {recs_written} records for {row['acc']}")
 
+                    time.sleep(5)
+
                 except requests.HTTPError as e:
                     print(f"HTTP error occurred: {e}")
                 except Exception as e:
                     print(f"An error occurred: {e}")
         else:
             print(f"Protein Accession: {row['acc']}, Genome Accession: Not found")
+
 
 text = open(f"{args.o}/undownloaded.txt", "w")
 for item in undownloaded:

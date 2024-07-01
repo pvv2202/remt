@@ -72,7 +72,7 @@ class Annotations:
             contig_id = record.name
             desc = feature["desc"].split(";")
             if contig_id not in self.contigs:
-                strain = desc[3][9:]
+                strain = desc[3][9:] if len(desc) > 3 else "Unknown"
                 self.contigs[contig_id] = Annotations.Contig(
                     ref=contig_id,
                     length=record.length,
@@ -87,12 +87,12 @@ class Annotations:
 
             if "enzyme/methyltransferase" in enz_type:
                 self.contigs[contig_id].fusions += 1
-            elif all(keyword not in enz_type for keyword in ["control protein", "homing endonuclease", "subunit", "helicase", "nicking endonuclease", "orphan", "methyl-directed"]) and "RecSeq:" in desc[1]:
-                seq = desc[1][7:].split(", ")
+            elif all(keyword not in enz_type for keyword in ["control protein", "homing endonuclease", "subunit", "helicase", "nicking endonuclease", "orphan", "methyl-directed"]) and (len(desc) < 2 or "RecSeq:" in desc[1]):
+                seq = desc[1][7:].split(", ") if len(desc) > 1 else "Unknown"
                 # Filter recognition sequence. Remove those with gaps, and if specified those with a long chain of N's, or less than 3 bases
-                seq = [s for s in seq if "-" not in s and (not self.args.ignore_nonspec or (len(s) >= 3 and "NNN" not in s))]
+                seq = [s for s in seq if "-" not in s and (not self.args.ignore_nonspec or (len(s) > 2 and "NNN" not in s))]
 
-                if not seq:
+                if not seq or seq == "Unknown":
                     continue
 
                 enzyme_class = Annotations.Methyl if any(feature["name"].startswith(prefix) for prefix in self.prefixes) else Annotations.RE
@@ -112,9 +112,10 @@ class Annotations:
 
     def parse(self):
         count = 0
-        for i, record in enumerate(gb_io.iter(self.args.i)):
-            print(f"Reading Contig {i}", end='\r')
-            self.process_record(record, count)
+        if type(self.args.i) is str and self.args.i.endswith('.gb'):
+            for i, record in enumerate(gb_io.iter(self.args.i)):
+                print(f"Reading Contig {i}", end='\r')
+                self.process_record(record, count)
         return self.contigs
 
 @jit(nopython=True)
@@ -228,11 +229,21 @@ def calculate_similarity(string1, string2):
 
 @jit(nopython=True)
 def distance(A_start, A_end, B_start, B_end, topology, contig_length):
+    # Ensure starts are lower values and ends are higher values
+    if A_start > A_end:
+        A_start, A_end = A_end, A_start
+    if B_start > B_end:
+        B_start, B_end = B_end, B_start
+
+    linear_distance = max(0, B_start - A_end, A_start - B_end)
     circular_distance = 0
 
     if topology == "circular":
-        circular_distance = contig_length - (
-                    max(A_end, B_end) - min(A_start, B_start))  # Total length - distance between start and end
+        dist1 = abs(A_start - B_end)
+        dist2 = abs(A_end - B_start)
+        circular_distance = min(dist1, dist2, contig_length - dist1, contig_length - dist2)
 
-    return min(max(0, B_start - A_end, A_start - B_end),
-               circular_distance)  # Return max b/c one of the start/end differences will always be negative. Then if circ dist is less return that
+    if topology == "linear":
+        return linear_distance
+    else:  # Assuming topology can only be "linear" or "circular"
+        return min(linear_distance, circular_distance)

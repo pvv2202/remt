@@ -31,6 +31,8 @@ else:
     print('Error: Unsupported file format. Please provide a .gb or .pkl file.')
     exit(1)
 
+os.makedirs(args.o, exist_ok=True)
+
 if not args.mats: # Only do this if the matrices are not provided
     for i, contig in enumerate(contigs.values()):
         print(f'{int(i / len(contigs) * 100)}%', end='\r')
@@ -39,7 +41,6 @@ if not args.mats: # Only do this if the matrices are not provided
         for m in contig.mts.values():
             mt_sequences += f">{m.locus}\n{m.translation}\n"
 
-    os.makedirs(args.o, exist_ok=True)
     # Write fasta files, generate matrices, load matrices
     with open(f"{args.o}/{args.o}_re_sequences.fasta", "w") as f:
         f.write(re_sequences)
