@@ -162,22 +162,6 @@ if hits:
             white-space: nowrap;
         }
     </style>
-    <script>
-        $(document).ready(function() {
-            $('#myTable').DataTable();
-
-            // Add click event to the whole table to toggle column width
-            $('#myTable').on('click', 'td, th', function() {
-                var index = $(this).index();
-                toggleColumnWidth(index);
-            });
-        });
-
-        function toggleColumnWidth(index) {
-            var columnClass = '.col-' + index;
-            $(columnClass).toggleClass('collapsed-column');
-        }
-    </script>
     """
     # Append the JavaScript code to the HTML file
     with open(f"{args.o}/{output_filename}", "a") as file:

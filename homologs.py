@@ -26,28 +26,37 @@ class Genome:
     '''
     def __init__(self, id):
         self.contigs = {}
-        self.systems = {}
+        self.contigs_all = {}
+        self.systems = []
         self.id = id
 
 re_homologs = {}
 mt_homologs ={}
 
+re_gs = []
+mt_gs = []
+re_con = []
+mt_con = []
+
 # RE directory, MT directory. Fill re_homologs and mt_homologs accordingly and find systems as you go
 for i, dir in enumerate(args.i):
-    if not os.path.isdir(dir):
-        continue
     for homolog_dir in os.listdir(dir):
         if not os.path.isdir(os.path.join(dir, homolog_dir)):
             continue
         dict = {}
-        if i == 0:
-            re_homologs[homolog_dir] = Homolog(homolog_dir)
+        if i == 0 or i == 2:
+            if homolog_dir not in re_homologs:
+                re_homologs[homolog_dir] = Homolog(homolog_dir)
             dict = re_homologs
-        elif i == 1:
-            mt_homologs[homolog_dir] = Homolog(homolog_dir)
+        elif i == 1 or i == 3:
+            if homolog_dir not in mt_homologs:
+                mt_homologs[homolog_dir] = Homolog(homolog_dir)
             dict = mt_homologs
         for genome in os.listdir(os.path.join(dir, homolog_dir)):
-            dict[homolog_dir].genomes[genome] = Genome(genome)
+            if "annotated" not in genome:
+                continue
+            if i < 2:
+                dict[homolog_dir].genomes[genome] = Genome(genome)
             # Reformat args to be passed to utils, then parse
             temp_args_dict = vars(args).copy()
             temp_args_dict['i'] = os.path.join(dir, homolog_dir, genome)
@@ -57,31 +66,40 @@ for i, dir in enumerate(args.i):
             contigs = annotation.parse()
 
             for contig_id, contig in contigs.items():
-                dict[homolog_dir].genomes[genome].contigs[contig_id] = contig
-                count = 0
-                # For each re, go through each mt and find the nearest one
-                for re in contig.res.values():
-                    nearest = (None, None, float('-inf'))
-                    for mt in contig.mts.values():
-                        dist = distance(re.start, re.end, mt.start, mt.end, contig.topology, contig.length)
-                        if dist > nearest[2]:
-                            nearest = (re, mt, dist)
-                    if nearest[0]:
-                        dict[homolog_dir].genomes[genome].systems[count] = nearest
-                        count += 1
+                # Populate contigs_all with gs annotated contigs. Then find systems and reference back to see if anything is nearby
+                if i < 2:
+                    dict[homolog_dir].genomes[genome].contigs_all[contig_id] = contig
+                    continue
+                elif i >= 2:
+                    dict[homolog_dir].genomes[genome].contigs[contig_id] = contig
 
-for homolog, homolog_obj in re_homologs.items():
-    for genome, genome_obj in homolog_obj.genomes.items():
-        for system, system_obj in genome_obj.systems.items():
-            print(f"Homolog: {homolog}, Genome: {genome}, Distance: {system_obj[2]}")
+                    # For each re, go through each mt and find the nearest one (for just the ones annotated with confirmed enzymes)
+                    for re in contig.res.values():
+                        nearest = [None, None, float('-inf'), None, None]
+                        for mt in contig.mts.values():
+                            dist = distance(re.start, re.end, mt.start, mt.end, contig.topology, contig.length)
+                            if dist > nearest[2]:
+                                nearest = [re, mt, dist, "None", "None"]
+                        if nearest[0]:
+                            if contig_id in dict[homolog_dir].genomes[genome].contigs_all:
+                                mts_near = []
+                                res_near = []
+                                for mt2 in dict[homolog_dir].genomes[genome].contigs_all[contig_id].mts.values():
+                                    if distance(nearest[0].start, nearest[0].end, mt2.start, mt2.end, contig.topology, contig.length) < 5000:
+                                        mts_near.append(mt2.locus)
+                                if len(mts_near) > 0:
+                                    nearest[3] = mts_near
+                                nearest.append(mts_near)
+                                for re2 in dict[homolog_dir].genomes[genome].contigs_all[contig_id].res.values():
+                                    if distance(nearest[1].start, nearest[1].end, re2.start, re2.end, contig.topology, contig.length) < 5000:
+                                        res_near.append(re2.locus)
+                                if len(res_near) > 0:
+                                    nearest[4] = res_near
+                            dict[homolog_dir].genomes[genome].systems.append(nearest)
 
-for homolog, homolog_obj in mt_homologs.items():
-    for genome, genome_obj in homolog_obj.genomes.items():
-        for system, system_obj in genome_obj.systems.items():
-            print(f"Homolog: {homolog}, Genome: {genome}, Distance: {system_obj[2]}")
-
-
-
-
-
-
+dicts = [re_homologs, mt_homologs]
+for dict in dicts:
+    for homolog, homolog_obj in dict.items():
+        for genome, genome_obj in homolog_obj.genomes.items():
+            for system in genome_obj.systems:
+                print(f"Homolog: {homolog}, Genome: {genome}, Distance: {system[2]}, Nearby MTs: {system[3]}, Nearby REs: {system[4]}")

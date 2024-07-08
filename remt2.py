@@ -142,7 +142,7 @@ if args.stats:
     print("Num Only RE: " + str(num_only_re))
     print("Num Only MT: " + str(num_only_mt))
 
-if args.histogram is not None or args.kde:
+if args.histogram or args.kde:
     distances = [hit["Distance"] for hit in hits.values()]
     if args.histogram:
         # Plot histogram
