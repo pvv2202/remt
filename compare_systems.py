@@ -91,15 +91,15 @@ for i, c in enumerate(contigs.values()):
                     if s2_dist < 5000:
                         continue
                     hits[count] = {
-                        "Contig": [c.ref, c2.ref],
-                        "Strain": [c.strain, c2.strain],
-                        "Types": [m.enzyme, r.enzyme, m2.enzyme, r2.enzyme],
-                        "Domains": [m.domain, r.domain, m2.domain, r2.domain],
-                        "Distance": [s1_dist, s2_dist],
-                        "Sequences": [m.seq, r.seq, m2.seq, r2.seq],
-                        "Loci": [m.locus, r.locus, m2.locus, r2.locus],
-                        "Scores": [m.score, r.score, m2.score, r2.score],
-                        "Translation": [m.translation, r.translation, m2.translation, r2.translation],
+                        "Contig": f"M1: {c.ref}\nR1: {c2.ref}",
+                        "Strain": f"M1: {c.strain}\nR1: {c2.strain}",
+                        "Types": f"M1: {m.enzyme}\nR1: {r.enzyme}\nM2: {m2.enzyme}\nR2: {r2.enzyme}",
+                        "Domains": f"M1: {m.domain}\nR1: {r.domain}\nM2: {m2.domain}\nR2: {r2.domain}",
+                        "Distance": f"M1: {s1_dist}\nR1: {s2_dist}",
+                        "Sequences": f"M1: {m.seq}\nR1: {r.seq}\nM2: {m2.seq}\nR2: {r2.seq}",
+                        "Loci": f"M1: {m.locus}\nR1: {r.locus}\nM2: {m2.locus}\nR2: {r2.locus}",
+                        "Scores": f"M1: {m.score}\nR1: {r.score}\nM2: {m2.score}\nR2: {r2.score}",
+                        "Translation": f"M1: {m.translation}\nR1: {r.translation}\nM2: {m2.translation}\nR2: {r2.translation}"
                     }
                     count += 1
 
