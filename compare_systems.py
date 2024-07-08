@@ -1,6 +1,7 @@
 import argparse
 import pickle
 import os
+import csv
 from domainator.seq_dist import seq_dist
 from domainator.data_matrix import DataMatrix
 from utils import Annotations, distance
@@ -104,65 +105,19 @@ for i, c in enumerate(contigs.values()):
 
 if hits:
     # Get the keys from the first dictionary in hits
-    for key, value in hits.items():
-        if isinstance(value, dict):
-            header_keys = value.keys()
-            break
-    else:
-        # Handle the case when no dictionaries are found in hits
-        header_keys = []
+    header_keys = hits[0].keys()
 
-    # Generate the HTML table with centered content
-    html_table = "<table id='myTable' style='border-collapse: collapse; font-family: Courier New, monospace; font-size: 0.7em; width: 100%'>\n"
-    # Create table header
-    html_table += "<thead><tr>"
-    for i, key in enumerate(header_keys):
-        html_table += f"<th class='col-{i}' style='border: 1px solid black; padding: 8px; text-align: left;' onclick='toggleColumnWidth({i})'>" + str(key) + "</th>"
-    html_table += "</tr></thead>\n"
-    # Create table rows
-    html_table += "<tbody>"
-    for item in hits.values(): # 2 dictionaries
-        if isinstance(item, dict):
-            html_table += "<tr>"
-            for i, (key, value) in enumerate(item.items()):
-                cell_content = ""
-                if key in ["Sequences", "Scores", "Types", "Domains", "Loci", "Translation"]:
-                    cell_content = "R: " + str(value[1]) + "<br>" + "M: " + str(value[0]) + "<br>" + "R2: " + str(value[3]) + "<br>" + "M2: " + str(value[2])
-                elif key in ["Contig", "Strain"]:
-                    cell_content = "C1: " + str(value[0]) + "<br>" + "C2: " + str(value[1])
-                else:
-                    cell_content = "S1: " + str(value[0]) + "<br>" + "S2: " + str(value[1])
-                html_table += f"<td class='col-{i}' style='border: 1px solid black; padding: 8px; text-align: left;'>{cell_content}</td>"
-            html_table += "</tr>\n"
-    html_table += "</tbody></table>"
+    output_filename = args.o + ".csv"
+    output_filepath = os.path.join(args.o, output_filename)
 
-    output_filename = args.o + ".html"
+    # Write the CSV file
+    with open(output_filepath, 'w', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=header_keys)
+        writer.writeheader()
 
-    # Write the HTML table to the file
-    with open(f"{args.o}/{output_filename}", 'w') as file:
-        file.write(html_table)
+        for hit in hits.values():
+            # Flatten the nested lists for CSV output
+            flattened_hit = {key: "\n".join(map(str, value)) if isinstance(value, list) else value for key, value in hit.items()}
+            writer.writerow(flattened_hit)
 
-    html_script = """
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.11.3/css/jquery.dataTables.min.css">
-    <script src="https://cdn.datatables.net/1.11.3/js/jquery.dataTables.min.js"></script>
-    <style>
-        .collapsed-column {
-            width: 10px !important;
-            max-width: 10px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-        table.dataTable td.collapsed-column, table.dataTable th.collapsed-column {
-            width: 10px;
-            max-width: 10px;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-    </style>
-    """
-    # Append the JavaScript code to the HTML file
-    with open(f"{args.o}/{output_filename}", "a") as file:
-        file.write(html_script)
+    print(f"CSV file saved to {output_filepath}")
