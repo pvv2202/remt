@@ -42,6 +42,7 @@ class Annotations:
 
     def extract_domainator_cds(self, record):
         cdss = {}
+        strain = record.definition.split(',')[0]
         for feature in record.features:
             qualifiers = {q.key: q.value for q in feature.qualifiers}
             if "cds_id" not in qualifiers:
@@ -50,7 +51,10 @@ class Annotations:
                 cdss[qualifiers["cds_id"]] = {}
             dict = cdss[qualifiers["cds_id"]]
             if feature.kind == "CDS":
+                if not qualifiers.get("translation") or not qualifiers.get("locus_tag"):
+                    continue
                 dict["translation"] = qualifiers["translation"]
+                dict["locus_tag"] = qualifiers["locus_tag"]
             elif feature.kind == "Domainator":
                 if not hasattr(feature.location, "start") or not hasattr(feature.location, "end") or not qualifiers.get("description") or not qualifiers.get("name") or not qualifiers.get("score"):
                     continue
@@ -59,10 +63,11 @@ class Annotations:
                 dict["desc"] = qualifiers["description"]
                 dict["name"] = qualifiers["name"]
                 dict["score"] = qualifiers["score"]
+                dict["strain"] = strain
 
         temp = cdss.copy()
         for id, cds in cdss.items():
-            if len(cds.keys()) < 2:
+            if len(cds.keys()) <= 2:
                 del temp[id]
         return temp
 
@@ -72,12 +77,11 @@ class Annotations:
             contig_id = record.name
             desc = feature["desc"].split(";")
             if contig_id not in self.contigs:
-                strain = desc[3][9:] if len(desc) > 3 else "Unknown"
                 self.contigs[contig_id] = Annotations.Contig(
                     ref=contig_id,
                     length=record.length,
                     topology="circular" if record.circular else "linear",
-                    strain=strain
+                    strain=feature["strain"]
                 )
 
             if self.args.min_score and float(feature["score"]) < self.args.min_score:
@@ -98,14 +102,14 @@ class Annotations:
                 enzyme_class = Annotations.Methyl if any(feature["name"].startswith(prefix) for prefix in self.prefixes) else Annotations.RE
                 enzyme_dict = self.contigs[contig_id].mts if enzyme_class == Annotations.Methyl else self.contigs[contig_id].res
                 enzyme_dict[count] = enzyme_class(
-                    seq=seq,
+                    seq=[s[1:] for s in seq],
                     start=feature["start"],
                     end=feature["end"],
                     score=feature["score"],
                     domain=feature["name"],
-                    enzyme=enz_type,
+                    enzyme=enz_type[1:],
                     ref=count,
-                    locus=cds_id,
+                    locus=feature["locus_tag"],
                     translation=feature["translation"]
                 )
                 count += 1

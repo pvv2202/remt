@@ -39,6 +39,8 @@ print("Finding Systems")
 for i, c in enumerate(contigs.values()):
     print(f'{int(i / len(contigs) * 100)}%', end='\r')
     # For each restriction enzyme and methyltransferase
+    if len(c.mts) > 100:
+        continue
     for r in c.res.values():
         for rseq in r.seq:
             for m in c.mts.values():
@@ -55,13 +57,14 @@ for i, c in enumerate(contigs.values()):
                         if ("NNN" in rseq and "NNN" not in mseq) or ("NNN" in mseq and "NNN" not in rseq):
                             continue
                         aligned_mseq, aligned_rseq, score = sw.smith_waterman(mseq, rseq)
+                        score = score/len(rseq)
                         #Filtering by score, length of rseq, absolute value of mseq
                         if score > 2 and len(aligned_rseq) > 3 and (len(aligned_mseq) == len(mseq)):
                             sim = calculate_similarity(mseq, rseq)
                             asim = calculate_similarity(aligned_mseq, aligned_rseq)
 
                             #Doing a better job getting the score
-                            weighted_score = round((asim + sim) * score) + round(1000/dist) if dist > 0 else 1000
+                            weighted_score = round((asim + sim) * score, 4) + round(0.001/dist, 4) if dist > 0 else 1000
 
                             if r.ref not in c.hits or weighted_score > c.hits[r.ref]["Score"]:
                                 temp = {
@@ -220,22 +223,6 @@ if hits:
             white-space: nowrap;
         }
     </style>
-    <script>
-        $(document).ready(function() {
-            $('#myTable').DataTable();
-
-            // Add click event to the whole table to toggle column width
-            $('#myTable').on('click', 'td, th', function() {
-                var index = $(this).index();
-                toggleColumnWidth(index);
-            });
-        });
-
-        function toggleColumnWidth(index) {
-            var columnClass = '.col-' + index;
-            $(columnClass).toggleClass('collapsed-column');
-        }
-    </script>
     """
     # Append the JavaScript code to the HTML file
     with open(output_filename, "a") as file:

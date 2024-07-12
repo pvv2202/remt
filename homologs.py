@@ -4,6 +4,8 @@ Sort through homologs of an MT and RE to output distances of systems and whether
 
 import argparse
 import os
+import matplotlib.pyplot as plt
+import seaborn as sns
 from utils import Annotations, distance
 
 parser = argparse.ArgumentParser(description='Generate HTML table from annotated GenBank file.')
@@ -97,9 +99,18 @@ for i, dir in enumerate(args.i):
                                     nearest[4] = res_near
                             dict[homolog_dir].genomes[genome].systems.append(nearest)
 
+distances = []
 dicts = [re_homologs, mt_homologs]
 for dict in dicts:
     for homolog, homolog_obj in dict.items():
         for genome, genome_obj in homolog_obj.genomes.items():
             for system in genome_obj.systems:
+                distances.append(system[2])
                 print(f"Homolog: {homolog}, Genome: {genome}, Distance: {system[2]}, Nearby MTs: {system[3]}, Nearby REs: {system[4]}")
+
+# Plot KDE
+sns.kdeplot(distances, fill=True, clip=(0, None))
+plt.title('KDE of Distances')
+plt.xlabel('Distance')
+plt.ylabel('Density')
+plt.show()
