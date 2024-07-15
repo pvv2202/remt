@@ -67,7 +67,7 @@ class Annotations:
 
         temp = cdss.copy()
         for id, cds in cdss.items():
-            if len(cds.keys()) <= 2:
+            if len(cds.keys()) <= 2 or len(cds.keys()) == 6:
                 del temp[id]
         return temp
 
