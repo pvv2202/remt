@@ -118,7 +118,7 @@ class Annotations:
         count = 0
         if type(self.args.i) is str and self.args.i.endswith('.gb'):
             for i, record in enumerate(gb_io.iter(self.args.i)):
-                print(f"Reading Contig {i}", end='\r')
+                #print(f"Reading Contig {i}", end='\r')
                 self.process_record(record, count)
         return self.contigs
 

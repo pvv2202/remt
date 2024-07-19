@@ -2,11 +2,13 @@ import argparse
 import pickle
 import matplotlib.pyplot as plt
 import seaborn as sns
+import pandas as pd
 from utils import Annotations, SmithWaterman, distance, calculate_similarity
 
 parser = argparse.ArgumentParser(description='Generate HTML table from annotated GenBank file.')
 parser.add_argument('-i', type=str, default=None, required=True, help='Annotated genbank or pickle file input')
-parser.add_argument('-o', type=str, default="def", required=False, help='File output name (HTML)')
+parser.add_argument('-o', type=str, default=None, required=True, help='File output name (HTML)')
+parser.add_argument('--comparison', type=str, default=None, required=False, help='Input csv comparison file')
 parser.add_argument('--stats', default=None, required=False, action='store_true', help='Print stats to console')
 parser.add_argument('--histogram', nargs='?', default=None, const=10, type=int, help='Output histogram of system distances. Specify bin size after. Default is 10')
 parser.add_argument('--kde', default=None, required=False, action='store_true', help='Output kde of system distances (clipped to display positive values only)')
@@ -34,18 +36,35 @@ else:
     print('Error: Unsupported file format. Please provide a .gb or .pkl file.')
     exit(1)
 
-print("\r")
-print("Finding Systems")
+#print("\r")
+#print("Finding Systems")
 for i, c in enumerate(contigs.values()):
-    print(f'{int(i / len(contigs) * 100)}%', end='\r')
+    #print(f'{int(i / len(contigs) * 100)}%', end='\r')
+
+    print(f"{c.ref}:")
+    for r in c.res.values():
+        print(f"RE: {r.start}, {r.end}")
+    for m in c.mts.values():
+        print(f"MT: {m.start}, {m.end}")
+
     # For each restriction enzyme and methyltransferase
-    if len(c.mts) > 100:
+    if len(c.mts) > 15:
         continue
     for r in c.res.values():
+        if "Type III" in r.enzyme:
+            continue
+        stop = False
         for rseq in r.seq:
             for m in c.mts.values():
+                dist = distance(min(r.start, r.end), max(r.start, r.end), min(m.start, m.end), max(m.start, m.end), c.topology, c.length)
+
+                if dist <= 10000:
+                    if r.ref in c.hits:
+                        del c.hits[r.ref]
+                    stop = True
+                    break
+
                 for mseq in m.seq:
-                    dist = distance(min(r.start, r.end), max(r.start, r.end), min(m.start, m.end), max(m.start, m.end), c.topology, c.length)
                     # Add any re/mts within specified range
                     if args.in_range and dist < args.in_range:
                         m.range.append(f'{r.domain}: {r.seq}')
@@ -64,7 +83,7 @@ for i, c in enumerate(contigs.values()):
                             asim = calculate_similarity(aligned_mseq, aligned_rseq)
 
                             #Doing a better job getting the score
-                            weighted_score = round((asim + sim) * score, 4) + round(0.001/dist, 4) if dist > 0 else 1000
+                            weighted_score = round((asim + sim) * score, 4) + round((m.score + r.score)/4000, 4)
 
                             if r.ref not in c.hits or weighted_score > c.hits[r.ref]["Score"]:
                                 temp = {
@@ -93,8 +112,10 @@ for i, c in enumerate(contigs.values()):
                                         temp["RE within " + str(args.in_range) + " bp"] = rt_in_range
 
                                 c.hits[r.ref] = temp
+        if stop:
+            continue
 
-print("\r    ")
+#print("\r    ")
 
 hits = {}
 count = 0
@@ -106,8 +127,6 @@ for contig in contigs.values():
 #Filtering hits for distance
 if args.min_distance is not None:
     hits = {h: v for h, v in hits.items() if v["Distance"] >= args.min_distance}
-
-print(len(hits))
 
 #Printing necessary data for stats
 if args.stats:
@@ -162,6 +181,39 @@ if args.histogram or args.kde:
         plt.ylabel('Density')
         plt.show()
 
+comparison = {}
+# Want to know if I've counted something for a specific contig
+if args.comparison:
+    comp = pd.read_csv(args.comparison)
+    print("Loaded Comparisons")
+    for index, row in comp.iterrows():
+        # Alwyas MT, RE
+        contigs = row["Contig"].split(" ")
+        domains = row["Domains"].split(" ")
+        distances = row["Distance"].split(" ")
+        close = [(domains[0], domains[1]), distances[0]]
+        split = [(domains[2], domains[3]), distances[1]]
+
+        if close[0] not in comparison:
+            comparison[close[0]] = {"Close": 1, "Split": 0, "Contigs": [contigs[0]]}
+        elif contigs[0] not in comparison[close[0]]["Contigs"]:
+            comparison[close[0]]["Close"] += 1
+            comparison[close[0]]["Contigs"].append(contigs[0])
+
+        if split[0] not in comparison:
+            comparison[split[0]] = {"Close": 0, "Split": 1, "Contigs": [contigs[1]]}
+        elif contigs[1] not in comparison[split[0]]["Contigs"]:
+            comparison[split[0]]["Split"] += 1
+            comparison[split[0]]["Contigs"].append(contigs[1])
+
+    for hit in hits:
+        if (hits[hit]["Domains"][0], hits[hit]["Domains"][1]) in comparison:
+            hits[hit]["Close"] = comparison[(hits[hit]["Domains"][0], hits[hit]["Domains"][1])]["Close"]
+            hits[hit]["Split"] = comparison[(hits[hit]["Domains"][0], hits[hit]["Domains"][1])]["Split"]
+        else:
+            hits[hit]["Close"] = 0
+            hits[hit]["Split"] = 0
+
 if hits:
     # Get the keys from the first dictionary in hits
     for key, value in hits.items():
@@ -173,9 +225,11 @@ if hits:
         header_keys = []
 
     # Generate the HTML table with centered content
-    html_table = "<table id='myTable' style='border-collapse: collapse; font-family: Courier New, monospace; font-size: 0.7em; width: 100%'>\n"
+    html_table = """
+    <table id='myTable' style='border-collapse: collapse; font-family: Courier New, monospace; font-size: 0.7em; width: 100%'>
+    <thead><tr>
+    """
     # Create table header
-    html_table += "<thead><tr>"
     for i, key in enumerate(header_keys):
         html_table += f"<th class='col-{i}' style='border: 1px solid black; padding: 8px; text-align: left;' onclick='toggleColumnWidth({i})'>" + str(key) + "</th>"
     html_table += "</tr></thead>\n"
@@ -223,7 +277,27 @@ if hits:
             white-space: nowrap;
         }
     </style>
+    <script>
+        $(document).ready(function() {
+            $('#myTable').DataTable({
+                "paging": true,
+                "searching": true,
+                "ordering": true,
+                "columnDefs": [{
+                    "targets": "_all",
+                    "orderable": true
+                }]
+            });
+        });
+
+        function toggleColumnWidth(columnIndex) {
+            var column = $('#myTable').DataTable().column(columnIndex);
+            $(column.header()).toggleClass('collapsed-column');
+            column.nodes().to$().toggleClass('collapsed-column');
+        }
+    </script>
     """
     # Append the JavaScript code to the HTML file
     with open(output_filename, "a") as file:
         file.write(html_script)
+
