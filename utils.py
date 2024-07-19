@@ -92,14 +92,15 @@ class Annotations:
             if "enzyme/methyltransferase" in enz_type:
                 self.contigs[contig_id].fusions += 1
             elif all(keyword not in enz_type for keyword in ["control protein", "homing endonuclease", "subunit", "helicase", "nicking endonuclease", "orphan", "methyl-directed"]) and (len(desc) < 2 or "RecSeq:" in desc[1]):
+                enzyme_class = Annotations.Methyl if any(feature["name"].startswith(prefix) for prefix in self.prefixes) else Annotations.RE
                 seq = desc[1][7:].split(", ") if len(desc) > 1 else "Unknown"
                 # Filter recognition sequence. Remove those with gaps, and if specified those with a long chain of N's, or less than 3 bases
                 seq = [s for s in seq if "-" not in s and (not self.args.ignore_nonspec or (len(s) > 2 and "NNN" not in s))]
 
-                if not seq or seq == "Unknown":
-                    continue
+                if enzyme_class == Annotations.RE: # Only skip if it's an RE
+                    if not seq or seq == "Unknown":
+                        continue
 
-                enzyme_class = Annotations.Methyl if any(feature["name"].startswith(prefix) for prefix in self.prefixes) else Annotations.RE
                 enzyme_dict = self.contigs[contig_id].mts if enzyme_class == Annotations.Methyl else self.contigs[contig_id].res
                 enzyme_dict[count] = enzyme_class(
                     seq=[s[1:] for s in seq],
