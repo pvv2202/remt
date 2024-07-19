@@ -58,6 +58,9 @@ for i, c in enumerate(contigs.values()):
                     stop = True
                     break
 
+                if m.seq[0] == "Unknown":
+                    continue
+
                 for mseq in m.seq:
                     # Add any re/mts within specified range
                     if args.in_range and dist < args.in_range:
