@@ -36,16 +36,10 @@ else:
     print('Error: Unsupported file format. Please provide a .gb or .pkl file.')
     exit(1)
 
-#print("\r")
-#print("Finding Systems")
+print("\r")
+print("Finding Systems")
 for i, c in enumerate(contigs.values()):
-    #print(f'{int(i / len(contigs) * 100)}%', end='\r')
-
-    print(f"{c.ref}:")
-    for r in c.res.values():
-        print(f"RE: {r.start}, {r.end}")
-    for m in c.mts.values():
-        print(f"MT: {m.start}, {m.end}")
+    print(f'{int(i / len(contigs) * 100)}%', end='\r')
 
     # For each restriction enzyme and methyltransferase
     if len(c.mts) > 15:
@@ -115,7 +109,7 @@ for i, c in enumerate(contigs.values()):
         if stop:
             continue
 
-#print("\r    ")
+print("\r    ")
 
 hits = {}
 count = 0
