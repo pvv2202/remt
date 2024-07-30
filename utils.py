@@ -97,9 +97,9 @@ class Annotations:
                 # Filter recognition sequence. Remove those with gaps, and if specified those with a long chain of N's, or less than 3 bases
                 seq = [s for s in seq if "-" not in s and (not self.args.ignore_nonspec or (len(s) > 2 and "NNN" not in s))]
 
-                if enzyme_class == Annotations.RE: # Only skip if it's an RE
-                    if not seq or seq[0] == "#Unknown":
-                        continue
+                # if enzyme_class == Annotations.RE: # Only skip if it's an RE
+                #     if not seq or seq[0] == "#Unknown":
+                #         continue
 
                 enzyme_dict = self.contigs[contig_id].mts if enzyme_class == Annotations.Methyl else self.contigs[contig_id].res
                 enzyme_dict[count] = enzyme_class(
@@ -119,7 +119,7 @@ class Annotations:
         count = 0
         if type(self.args.i) is str and self.args.i.endswith('.gb'):
             for i, record in enumerate(gb_io.iter(self.args.i)):
-                print(f"Reading Contig {i}", end='\r')
+                # print(f"Reading Contig {i}", end='\r')
                 self.process_record(record, count)
         return self.contigs
 

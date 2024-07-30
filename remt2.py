@@ -41,32 +41,45 @@ print("Finding Systems")
 for i, c in enumerate(contigs.values()):
     print(f'{int(i / len(contigs) * 100)}%', end='\r')
 
+    # for mt in c.mts.values():
+    #     print(f"MT: {mt.enzyme}, Start: {mt.start}, End: {mt.end}")
+    #
+    # for re in c.res.values():
+    #     print(f"RE: {re.enzyme}, Start: {re.start}, End: {re.end}")
+
     # For each restriction enzyme and methyltransferase
-    if len(c.mts) > 15:
+    if len(c.mts) > 50:
         continue
+
+    # Add in range
+    for key, r in c.res.items():
+        for m in c.mts.values():
+            dist = distance(min(r.start, r.end), max(r.start, r.end), min(m.start, m.end), max(m.start, m.end), c.topology, c.length)
+
+            if args.in_range and dist < args.in_range:
+                m.range.append(f'{r.domain}: {r.seq}')
+                r.range.append(f'{m.domain}: {m.seq}')
+
+
     for r in c.res.values():
         if "Type III" in r.enzyme:
             continue
         stop = False
         for rseq in r.seq:
+            found_close = False
             for m in c.mts.values():
                 dist = distance(min(r.start, r.end), max(r.start, r.end), min(m.start, m.end), max(m.start, m.end), c.topology, c.length)
 
                 if dist <= 10000:
+                    found_close = True
                     if r.ref in c.hits:
                         del c.hits[r.ref]
                     stop = True
-                    break
 
-                if m.seq[0] == "Unknown":
+                if found_close or m.seq[0] == "Unknown":
                     continue
 
                 for mseq in m.seq:
-                    # Add any re/mts within specified range
-                    if args.in_range and dist < args.in_range:
-                        m.range.append(f'{r.domain}: {r.seq}')
-                        r.range.append(f'{m.domain}: {m.seq}')
-
                     # If mseq <= rseq (if greater cannot block every site), run smith-waterman
                     if len(mseq) <= len(rseq):
                         # Filter any weird matches to nonsepc regions
