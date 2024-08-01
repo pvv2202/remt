@@ -4,6 +4,7 @@ from numba import jit
 
 class Annotations:
     class Contig:
+        '''Class to store information about a contig'''
         def __init__(self, ref, length, topology, strain):
             self.ref = ref
             self.length = length
@@ -15,6 +16,7 @@ class Annotations:
             self.hits = {}
 
     class Enzyme:
+        '''Class to store information about an enzyme'''
         def __init__(self, seq, start, end, score, domain, enzyme, ref, locus, translation):
             # Reference number for faster lookup
             self.seq = seq
