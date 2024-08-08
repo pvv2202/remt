@@ -1,7 +1,11 @@
+'''
+Generate stats from remt2 HTML output. In newer versions or remt, this doesn't tell much because it only outputs split systems.
+REMT can be easily modified to output full systems, however.
+'''
+
 import argparse
 import matplotlib.pyplot as plt
 import seaborn as sns
-import numpy as np
 from bs4 import BeautifulSoup
 
 parser = argparse.ArgumentParser(description='Generate statistics from remt2 HTML output.')
@@ -12,17 +16,13 @@ if args.i is not None:
     with open(args.i[0], 'r') as file:
         soup = BeautifulSoup(file, 'html.parser')
 
-    # Find the table by its ID
     table = soup.find('table', {'id': 'myTable'})
 
-    # Extract table headers to find the index of the "Distance" column
     headers = [header.text for header in table.find('thead').find_all('th')]
     distance_index = headers.index('Distance')
 
-    # Initialize the list for distance values
     distances = []
 
-    # Extract the values from the "Distance" column
     for row in table.find('tbody').find_all('tr'):
         cells = row.find_all('td')
         distance_value = cells[distance_index].get_text(strip=True)

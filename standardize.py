@@ -1,3 +1,8 @@
+'''
+Program to standardize the REBASE protein sequences to the Gold Standard protein sequences. Highly specialized for np_prot but could easily be modified
+for a different FASTA file format.
+'''
+
 from Bio import SeqIO
 
 to_change = "reb_all_np_prot.faa"

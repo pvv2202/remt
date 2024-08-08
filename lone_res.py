@@ -1,3 +1,7 @@
+'''
+Output HTML file containing all lone REs. Excel friendly by default
+'''
+
 import argparse
 import pickle
 from utils import Annotations, distance

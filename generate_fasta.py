@@ -31,11 +31,17 @@ for genome in os.listdir(dir):
 
     for contig_id, c in contigs.items():
         for r in c.res.values():
+            added = False
             for m in c.mts.values():
                 if distance(min(r.start, r.end), max(r.start, r.end), min(m.start, m.end), max(m.start, m.end), c.topology, c.length) < 10000:
                     fasta += f">c__{contig_id}_{r.enzyme}_{genome}\n{r.translation}\n"
                 else:
                     fasta += f">s__{contig_id}_{r.enzyme}_{genome}\n{r.translation}\n"
+                added = True
+                break
+            if added:
+                break
+
 
 # Writing to genomes file
 with open(f'{args.o}_genomes', 'w') as file:

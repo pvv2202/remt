@@ -27,21 +27,21 @@ async def fetch_genome_data(protein_acc):
     url = f"https://www.ncbi.nlm.nih.gov/ipg/?term={protein_acc}"
     genome_accessions = []
     try:
-        # Launch the browser
+        # Launch browser
         browser = await launch(headless=True)
         page = await browser.newPage()
         await page.goto(url, {'waitUntil': 'networkidle2', 'timeout': 120000})
 
-        # Wait for the page to load (you can adjust the selector)
+        # Wait for page to load
         await page.waitForSelector('#ph-ipg > div.ipg-rs > table > tbody > tr > td:nth-child(7) > a',{'timeout': 120000})
 
-        # Extract data (adjust the selector as necessary)
+        # Extract from the td element
         data_elements = await page.querySelectorAll('#ph-ipg > div.ipg-rs > table > tbody > tr > td:nth-child(7) > a')
         for element in data_elements:
             text = await page.evaluate('(element) => element.textContent', element)
             genome_accessions.append(text)
 
-        # Close the browser
+        # Close browser
         await browser.close()
 
     except asyncio.TimeoutError:
@@ -106,13 +106,13 @@ for index, row in df.iterrows():
                         for chunk in response.iter_content(chunk_size=8192):
                             output_handle.write(chunk)
 
-                    # Unzipping and changing the extension to .gb
+                    # Unzip and change extension to .gb
                     with gzip.open(gz_file_path, "rt") as gzipped_file:
                         with open(gb_file_path, "w") as gb_file:
                             records = tqdm.tqdm(SeqIO.parse(gzipped_file, "genbank"), desc=acc_dir, leave=True, dynamic_ncols=True)
                             recs_written = SeqIO.write(records, gb_file, "genbank")
 
-                    # Remove the gzipped file after unzipping
+                    # Remove gzipped file after unzipping
                     os.remove(gz_file_path)
 
                     print(f"Downloaded and converted {recs_written} records for {row['acc']}")

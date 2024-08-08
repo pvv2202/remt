@@ -1,3 +1,6 @@
+'''
+Old remt program. Finds split systems
+'''
 import json
 import argparse
 import os

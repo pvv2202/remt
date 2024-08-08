@@ -1,3 +1,6 @@
+'''
+Program to read REBASE data
+'''
 import pandas as pd
 
 class Contig:

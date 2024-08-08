@@ -1,3 +1,7 @@
+'''
+Program to clean the output of compare systems to be used as an input for REMT
+'''
+
 import csv
 import math
 

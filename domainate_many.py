@@ -1,3 +1,6 @@
+'''
+Program to run domainator on multiple GenBank files in a directory.
+'''
 import os
 import subprocess
 import glob

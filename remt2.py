@@ -1,3 +1,7 @@
+'''
+Program to output putative split restriction modification systems
+'''
+
 import argparse
 import pickle
 import matplotlib.pyplot as plt
@@ -41,11 +45,12 @@ print("Finding Systems")
 for i, c in enumerate(contigs.values()):
     print(f'{int(i / len(contigs) * 100)}%', end='\r')
 
-    # for mt in c.mts.values():
-    #     print(f"MT: {mt.enzyme}, Start: {mt.start}, End: {mt.end}")
-    #
-    # for re in c.res.values():
-    #     print(f"RE: {re.enzyme}, Start: {re.start}, End: {re.end}")
+    if c.ref == "AP025562":
+        for mt in c.mts.values():
+            print(f"MT: {mt.enzyme}, Start: {mt.start}, End: {mt.end}")
+
+        for re in c.res.values():
+            print(f"RE: {re.enzyme}, Start: {re.start}, End: {re.end}")
 
     # For each restriction enzyme and methyltransferase
     if len(c.mts) > 50:
@@ -138,6 +143,10 @@ for contig in contigs.values():
 if args.min_distance is not None:
     hits = {h: v for h, v in hits.items() if v["Distance"] >= args.min_distance}
 
+'''
+REMT now only outputs split systems. For the stats to be meaningful, a reciprocal relationship to distance would have to be added back into 
+the weighted sum that determines the best hit.
+'''
 #Printing necessary data for stats
 if args.stats:
     num_none = 0
@@ -310,4 +319,3 @@ if hits:
     # Append the JavaScript code to the HTML file
     with open(output_filename, "a") as file:
         file.write(html_script)
-

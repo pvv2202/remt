@@ -1,4 +1,4 @@
-# remt
+# remt2.py
 
 Program to find restriction modification systems. Optimized for finding high-confidence split systems.
 This repository contains both remt.py and remt2.py. remt.py was a first pass at making this program and is potentially useful as a reference or for 
@@ -6,36 +6,54 @@ very specific needs, but remt2 is faster and more effective.
 
 remt2 depends heavily on dominator. To use, you must first annotate a genbank file using domainate.py. For example:
 
-`domainate.py -i input.gb -r reference.fasta --max_overlap 0.6 -o output.gb`
+`domainate.py -i unannotated.gb -r reference.fasta --max_overlap 0.6 -o annotated.gb`
 
-After annotating with a reference fasta file, you must generate two different enumerated reports. The first will be annotated by domain. For example:
+After running through Domainator, the annotated GenBank file can be used as input for REMT. For example:
 
-`enum_report.py -i annotated_input.gb --by domain --domain_descriptions --start --end --score -o output_by_domain.tsv`
-
-The second will be annotated by contig. For example:
-
-`enum_report.py -i annotated_input.gb --by contig --length --topology -o output_by_contig.tsv`
-
-Note that remt requires the domain_descriptions, start, end, score, length, and topology fields to function. Domain or contig tsv reports that do not
-contain this information will lead to errors. 
-
-After generating, both reports can be fed into remt2. For example:
-
-`python remt2.py -i by_domain.tsv  by_contig.tsv -o output`
-*For inputs, by domain goes first and by contig goes second
+`python3 remt2.py -i annotated.gb -o output`
 
 remt2 is tailored for annotations using All_REBASE_Gold_Standards_Protein_20221213.fasta. To use a different reference file you will need to
-get it in the same format as Gold Standard annotations. standardize.py (found in the helper programs folder) or remt2 could be tweaked to accomodate different 
-fasta files. 
+get it in the same format as Gold Standard annotations. standardize.py or remt2 could be tweaked to accomodate different fasta file formats. 
 
 remt2 also contains a number of arguments. These include:
+
 ```
---coords will include the start and end points of the annotated domains listed
---stats prints a number of useful statistics about the run (thing like # of contigs, # of systems, etc.)
+--comparison requires an input csv comparison file and tells how often homologous systems appear clustered and split. 
+--stats prints a number of statistics about the run (thing like # of contigs, # of systems, etc.)
+--histogram outputs a histogram of system distances. The default bin size is 10, but this can be changed by specifying a number after the argument
+--kde outputs a kernel density estimate of system distances. This is clipped to display positive values only
 --excel makes the results excel friendly. The default puts the re/mt results on different lines and is better for reading HTML results
---filter_n will remove enzymes with recognition sequences that contain >3 Ns in a row. Can be useful as sequences with many Ns in a row can lead to some weird matches
---ingore_nonspec will remove enzyems with nonspecific recognition sequences (sequences <3 bp)
+--ingore_nonspec will remove enzyems with nonspecific recognition sequences (sequences <3 bp) or enzymes with many Ns in the recognition sequence
 --min_distance takes an integer as an argument and will only output systems above the specified minimum distance
 --min_score takes an integer as an argument and will only include enzymes above the specified score (scores come from domainate.py. Typically a min score of 40-60 is best)
 --in_range takes an integer as an argument and will include the reference sequences of mts within the specified range of listed res and vice versa
 ```
+# compare_systems.py
+
+Program to sort through an annotated genbank file and, for every clustered system, find all homologous systems that are split. The output of this
+can be cleaned and used as an input to remt2. Considerable improvements could be made, but it is functional and its output is useful for filtering 
+remt2 results. The outputs from compare_systems have to be cleaned by clean.py to be used as input for remt2. 
+
+compare_systems depends on dominator. To use, you must first annotate a genbank file using domainate.py as in remt2. 
+
+You can then run compare_systems. For example:
+
+`python3 compare_systems.py -i annotated.gb -o output`
+
+compare_systems has a number of arguments. Several are the same as remt2. The only new argument is --mats which can take the data matrices generated
+by compare_systems as input. 
+
+# genome_from_protein.py
+
+Program that takes both an ncbi assembly summary file and an ncbi table (downloaded after a blast search on a specific protein) and, for every homologous system, downloads
+any genomes in which the homolog appears. The output of this can then be fed into homologs.py to find data about homologous systems
+
+# homologs.py
+
+Program that takes directories generated by genome_from_protein as input and ouputs KDEs and stats about the distances of all homologous systems to the console.
+
+# utils.py
+
+A number of utility functions used by the other programs. Notably, by importing annotations and giving it required input arguments, you can parse annotated GenBank files
+and get a dictionary of contigs, each of which contains relevant information about the contig itself and dictionaries containing information about all of the 
+restriction enzyems and methlytransferases on that contig. 

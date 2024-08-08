@@ -1,3 +1,6 @@
+'''
+Program to generate a graph from remt2 HTML output
+'''
 import argparse
 from domainator.seq_dist import seq_dist
 from domainator.data_matrix import DataMatrix
@@ -13,7 +16,6 @@ args = parser.parse_args()
 def plot_graph(G):
     pos = nx.spring_layout(G)
 
-    # Extract edges and weights
     edge_x = []
     edge_y = []
     edge_weights = []
@@ -35,7 +37,6 @@ def plot_graph(G):
         hoverinfo='none',
         mode='lines')
 
-    # Extract nodes and names
     node_x = []
     node_y = []
     node_text = []
@@ -79,10 +80,9 @@ if args.i is not None and args.i[0].endswith('.html'):
     with open(args.i[0], 'r') as file:
         soup = BeautifulSoup(file, 'html.parser')
 
-    # Find the table by its ID
+    # Find table ID
     table = soup.find('table', {'id': 'myTable'})
 
-    # Extract table headers to find the index of the "Distance" column
     headers = [header.text for header in table.find('thead').find_all('th')]
     translation_index = headers.index('Translation')
     strain_index = headers.index('Strain')
@@ -91,7 +91,6 @@ if args.i is not None and args.i[0].endswith('.html'):
     re_sequences=""
     mt_sequences=""
 
-    # Extract the values from the "Distance" column
     for row in table.find('tbody').find_all('tr'):
         cells = row.find_all('td')
         # Get strain name
@@ -110,7 +109,7 @@ if args.i is not None and args.i[0].endswith('.html'):
         f.write(re_sequences)
     with open(f"{args.o[0]}mt_sequences.fasta", "w") as f:
         f.write(mt_sequences)
-    # seq_dist(input_path, input_type, reference_path, reference_type, k, algorithm, mode, threads, dense, dense_text, sparse, lb):
+
     seq_dist(f"{args.o[0]}re_sequences.fasta", "fasta", f"{args.o[0]}re_sequences.fasta", "fasta", None, "diamond_us", "score", 8, None, None, f"{args.o[0]}re_simlarity_matrix.hdf5", 0)
     seq_dist(f"{args.o[0]}mt_sequences.fasta", "fasta", f"{args.o[0]}mt_sequences.fasta", "fasta", None, "diamond_us", "score", 8, None, None, f"{args.o[0]}mt_simlarity_matrix.hdf5", 0)
 
@@ -120,14 +119,7 @@ else:
     print('Error: No input file specified.')
     exit(1)
 
-# if args.i is not None and args.i[0].endswith('.hdf5'):
-#     re_matrix = DataMatrix.from_file(f"{args.i[0][:-5]}re_simlarity_matrix.hdf5")
-#     mt_matrix = DataMatrix.from_file(f"{args.i[0][:-5]}mt_simlarity_matrix.hdf5")
-# elif html not in args.i:
-#     print('Error: No input file specified.')
-#     exit(1)
-
-# Create a graph
+# Create graphs
 G_re = nx.Graph()
 G_mt = nx.Graph()
 
@@ -137,18 +129,18 @@ for re in re_matrix.columns:
 for mt in mt_matrix.columns:
     G_mt.add_node(mt.split(":")[2], type='mt')
 
-# Add edges with weights from the similarity matrices
+# Add edges with weights from matrices
 for i, re1 in enumerate(re_matrix.columns):
     for j, re2 in enumerate(re_matrix.rows):
         if i != j:
-            weight = re_matrix.data[i, j]  # Assuming the data matrix is symmetrical
+            weight = re_matrix.data[i, j] # Matrix is symmetrical so
             if weight > 20:
                 G_re.add_edge(re1.split(":")[2], re2.split(":")[2], weight=weight)
 
 for i, mt1 in enumerate(mt_matrix.columns):
     for j, mt2 in enumerate(mt_matrix.rows):
         if i != j:
-            weight = mt_matrix.data[i, j]  # Assuming the data matrix is symmetrical
+            weight = mt_matrix.data[i, j]
             if weight > 20:
                 G_mt.add_edge(mt1.split(":")[2], mt2.split(":")[2], weight=weight)
 

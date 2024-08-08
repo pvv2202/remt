@@ -1,5 +1,5 @@
 '''
-Merge homologs downloads from genome_from_protein.py
+Merge homologs downloads from genome_from_protein.py. Useful to get all homologs in one place.
 '''
 
 import argparse

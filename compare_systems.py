@@ -1,3 +1,7 @@
+'''
+Program that finds close systems and matches them to homologous split systems
+'''
+
 import argparse
 import pickle
 import os
@@ -89,7 +93,7 @@ for i, c in enumerate(contigs.values()):
                         continue
                     s2_dist = distance(min(r2.start, r2.end), max(r2.start, r2.end), min(m2.start, m2.end), max(m2.start, m2.end), c2.topology, c2.length)
                     if s2_dist < 5000:
-                        continue
+                        break # If we find an MT nearby, this RE is not in a split system
                     hits[count] = {
                         "Contig": f"M1: {c.ref}\nR1: {c2.ref}",
                         "Strain": f"M1: {c.strain}\nR1: {c2.strain}",
