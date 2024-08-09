@@ -45,8 +45,8 @@ by compare_systems as input.
 
 # genome_from_protein.py
 
-Program that takes both an ncbi assembly summary file and an ncbi table (downloaded after a blast search on a specific protein) and, for every homologous system, downloads
-any genomes in which the homolog appears. The output of this can then be fed into homologs.py to find data about homologous systems
+Program that takes both an ncbi assembly summary file and an ncbi table (called "Descriptions Table (CSV)" which can be downloaded after a BLAST search) and, for every 
+homologous system, downloads any genomes in which the homolog appears. The output of this can then be fed into homologs.py to find data about homologous systems
 
 # homologs.py
 
