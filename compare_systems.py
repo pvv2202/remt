@@ -1,6 +1,6 @@
-'''
+"""
 Program that finds close systems and matches them to homologous split systems
-'''
+"""
 
 import argparse
 import pickle

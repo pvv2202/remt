@@ -1,6 +1,6 @@
-'''
+"""
 Sort through homologs of an MT and RE to output distances of systems and whether other enzymes are nearby
-'''
+"""
 
 import argparse
 import os
@@ -15,17 +15,17 @@ parser.add_argument('--ignore_nonspec', default=None, required=False, action='st
 args = parser.parse_args()
 
 class Homolog:
-    '''
+    """
     Represents a homologous protein. Contains a dictionary of genomes in which it appears, each of which contains a dictionary of contig objects from utils.py.
-    '''
+    """
     def __init__(self, id):
         self.genomes = {}
         self.id = id
 
 class Genome:
-    '''
+    """
     Represents a genome. Contains a dictionary of contig objects from utils.py.
-    '''
+    """
     def __init__(self, id):
         self.contigs = {}
         self.contigs_all = {}

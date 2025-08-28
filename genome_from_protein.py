@@ -12,7 +12,7 @@ from pyppeteer import launch
 from Bio import SeqIO
 
 parser = argparse.ArgumentParser(description='Downloads genomes from protein data')
-parser.add_argument('-i', type=str, default=None, required=True, help='TSV table input')
+parser.add_argument('-i', type=str, default=None, required=True, help='CSV table input')
 parser.add_argument('--ncbi', type=str, default=None, required=True, help='NCBI assembly summary file')
 #parser.add_argument('-lbs', nargs='+', type=int, default=None, required=True, help='Lower bounds. Cover, Identity.')
 parser.add_argument('-o', type=str, default=None, required=True, help='Output folder name')
@@ -78,20 +78,14 @@ for index, row in df.iterrows():
             os.makedirs(protein_dir, exist_ok=True)
 
             for gen_ac in genome_acc:
-                url = ""
-                if gen_ac.startswith("GCA_"):
-                    if gen_ac not in ncbi['#assembly_accession'].values:
-                        print(f"Genome Accession: {gen_ac}, FTP path not found")
-                        continue
+                if gen_ac in ncbi['#assembly_accession'].values:
                     url = ncbi.loc[ncbi['#assembly_accession'] == gen_ac, 'ftp_path'].values[0]
-                elif gen_ac.startswith("GCF_"):
-                    if gen_ac not in ncbi['gbrs_paired_asm'].values:
-                        print(f"Genome Accession: {gen_ac}, FTP path not found")
-                        continue
+                elif gen_ac in ncbi['gbrs_paired_asm'].values:
                     url = ncbi.loc[ncbi['gbrs_paired_asm'] == gen_ac, 'ftp_path'].values[0]
                 else:
-                    print("Unknown accession type")
+                    print(f"Genome Accession: {gen_ac}, FTP path not found")
                     continue
+
                 acc_dir = url[url.rfind('/') + 1:]
                 url = f"{url}/{acc_dir}_genomic.gbff.gz"
 

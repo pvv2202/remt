@@ -75,7 +75,7 @@ for i, c in enumerate(contigs.values()):
             for m in c.mts.values():
                 dist = distance(min(r.start, r.end), max(r.start, r.end), min(m.start, m.end), max(m.start, m.end), c.topology, c.length)
 
-                if dist <= 10000:
+                if dist <= 4000:
                     found_close = True
                     if r.ref in c.hits:
                         del c.hits[r.ref]
@@ -92,12 +92,12 @@ for i, c in enumerate(contigs.values()):
                             continue
                         aligned_mseq, aligned_rseq, score = sw.smith_waterman(mseq, rseq)
                         score = score/len(rseq)
-                        #Filtering by score, length of rseq, absolute value of mseq
-                        if score > 2 and len(aligned_rseq) > 3 and (len(aligned_mseq) == len(mseq)):
+                        # Filtering by score, length of rseq, absolute value of mseq
+                        if score > 2 and len(aligned_rseq) > 3 and (len(aligned_mseq) >= len(mseq)):
                             sim = calculate_similarity(mseq, rseq)
                             asim = calculate_similarity(aligned_mseq, aligned_rseq)
 
-                            #Doing a better job getting the score
+                            # Doing a better job getting the score
                             weighted_score = round((asim + sim) * score, 4) + round((m.score + r.score)/4000, 4)
 
                             if r.ref not in c.hits or weighted_score > c.hits[r.ref]["Score"]:

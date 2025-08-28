@@ -1,6 +1,6 @@
-'''
+"""
 Program to run domainator on multiple GenBank files in a directory.
-'''
+"""
 import os
 import subprocess
 import glob
@@ -39,9 +39,14 @@ for i, protein_dir in enumerate(os.listdir(root_dir)):
         gb_files = glob.glob(os.path.join(full_path, "*.gb"))
         for gb_file in gb_files:
             if "_annotated" not in gb_file:
-                if gb_file.replace(".gb", "_annotated.gb") not in gb_files:
+                annotated_file = gb_file.replace(".gb", "_annotated.gb")
+                if annotated_file not in gb_files:
                     annotate_genbank(gb_file, reference_fasta)
                 else:
-                    print(f"File {gb_file} has already been annotated.")
-
-
+                    print(f"File {gb_file} has already been annotated. Re-annotating...")
+                    try:
+                        os.remove(annotated_file)
+                        print(f"Deleted {annotated_file}")
+                    except OSError as e:
+                        print(f"Error deleting {annotated_file}: {e}")
+                    annotate_genbank(gb_file, reference_fasta)

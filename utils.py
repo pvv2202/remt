@@ -149,7 +149,7 @@ def smith_waterman_jit(sequence1, sequence2, exact_match_score, match_score, mis
             match = score_matrix[i - 1, j - 1] + to_add  # Match, so move up in both sequences
             delete = score_matrix[i - 1, j] + gap_penalty  # Move up one in sequence 2
             insert = score_matrix[i, j - 1] + gap_penalty  # Move up one in sequence 1
-            score_matrix[i, j] = max(0, match, delete, insert)
+            score_matrix[i, j] = max(0, match, delete, insert) # Set it to be the best option
 
             if score_matrix[i, j] == match:
                 traceback_matrix[i, j] = 1  # Diagonal
